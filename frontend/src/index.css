@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --font-amiri: 'Amiri', serif;
+  --color-primary: #8B6F5C;
+  --color-primary-dark: #6B5548;
+  --color-secondary: #4A7C6F;
+  --color-accent: #C9A86C;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+}
+
+/* Arabic text styling */
+.arabic-text {
+  font-family: var(--font-amiri), 'Traditional Arabic', serif;
+  direction: rtl;
+  line-height: 2;
+}
