@@ -44,11 +44,14 @@ export function AyahCard({ result }: AyahCardProps) {
 
   const isHurufMuqattaat = HURUF_MUQATTAAT_VERSES.has(result.ayah_key);
 
+  // Count only items shown in expandable section (not tafsirs - they're shown separately)
+  // Extra translations (beyond the first) are also shown in expanded section
+  const extraTranslations = Math.max(0, result.translations.length - 1);
   const totalRelated =
-    result.tafsirs.length +
     result.posts.length +
     result.courses.length +
-    result.articles.length;
+    result.articles.length +
+    extraTranslations;
 
   // End of ayah marker with Arabic numerals
   const ayahMarker = `\u06DD${toArabicNumerals(result.ayah)}`; // ۝ + number
@@ -168,13 +171,12 @@ export function AyahCard({ result }: AyahCardProps) {
               {totalRelated} related{' '}
               {totalRelated === 1 ? 'item' : 'items'}
               <span className="text-warm-500 font-normal ml-2">
-                ({result.posts.length > 0 && `${result.posts.length} posts`}
-                {result.posts.length > 0 && result.courses.length > 0 && ', '}
-                {result.courses.length > 0 && `${result.courses.length} courses`}
-                {(result.posts.length > 0 || result.courses.length > 0) &&
-                  result.articles.length > 0 &&
-                  ', '}
-                {result.articles.length > 0 && `${result.articles.length} articles`})
+                ({[
+                  result.posts.length > 0 && `${result.posts.length} posts`,
+                  result.courses.length > 0 && `${result.courses.length} courses`,
+                  result.articles.length > 0 && `${result.articles.length} articles`,
+                  extraTranslations > 0 && `${extraTranslations} more translations`,
+                ].filter(Boolean).join(', ')})
               </span>
             </span>
             {expanded ? (

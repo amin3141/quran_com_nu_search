@@ -88,6 +88,16 @@ The server defaults to `http://localhost:7070` and exposes `GET /api/search`.
 - `SEARCH_DEFAULT_LANGUAGE` (default `en`)
 - `SEARCH_LIMIT_QURAN`, `SEARCH_LIMIT_TRANSLATION`, `SEARCH_LIMIT_TAFSIR`, `SEARCH_LIMIT_POST`, `SEARCH_LIMIT_COURSE`, `SEARCH_LIMIT_ARTICLE`
 
+### Railway
+
+Deploy as two Railway services (mirrors `goodcrm`):
+
+- **Backend**: set root directory to `server`, uses `server/railway.toml` + `server/Dockerfile`.
+  - Required vars: `GOODMEM_API_KEY`
+  - Optional: `GOODMEM_BASE_URL`, `GOODMEM_INSECURE_SSL`
+- **Frontend**: set root directory to `frontend`, uses `frontend/railway.toml`.
+  - Set `VITE_API_BASE_URL` to your backend URL (e.g. `https://your-backend.up.railway.app`)
+
 ## Example Queries
 
 Try these searches to see different result types:

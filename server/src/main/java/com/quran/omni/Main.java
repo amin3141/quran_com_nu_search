@@ -50,7 +50,7 @@ public final class Main {
             javalinConfig.events.serverStopping(searchService::shutdown);
         });
 
-        app.start(config.port());
+        app.start("0.0.0.0", config.port());
         logger.info("Search server started on port {}", config.port());
     }
 
