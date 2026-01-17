@@ -110,8 +110,6 @@ export interface SearchResponse {
   totalResults: number;
 }
 
-export type SearchMode = 'search' | 'ai-chat';
-
 export interface FilterOptions {
   spaces: SpaceType[];
   language: string;

@@ -6,11 +6,26 @@
   --color-primary-dark: #6B5548;
   --color-secondary: #4A7C6F;
   --color-accent: #C9A86C;
+
+  /* Warm earth tones to replace cool grays */
+  --color-warm-50: #FAF9F7;
+  --color-warm-100: #F5F3F0;
+  --color-warm-200: #E8E4DE;
+  --color-warm-300: #D4CEC4;
+  --color-warm-400: #A69D8F;
+  --color-warm-500: #78706A;
+  --color-warm-600: #5C564F;
+  --color-warm-700: #44403A;
+  --color-warm-800: #2D2A26;
+  --color-warm-900: #1C1A17;
 }
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    background-color: #FAF9F7;
+    color: #2D2A26;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -20,3 +35,26 @@
   direction: rtl;
   line-height: 2;
 }
+
+/* Warm color utilities */
+.bg-warm-50 { background-color: #FAF9F7; }
+.bg-warm-100 { background-color: #F5F3F0; }
+.bg-warm-200 { background-color: #E8E4DE; }
+
+.border-warm-200 { border-color: #E8E4DE; }
+.border-warm-300 { border-color: #D4CEC4; }
+
+.text-warm-300 { color: #D4CEC4; }
+.text-warm-400 { color: #A69D8F; }
+.text-warm-500 { color: #78706A; }
+.text-warm-600 { color: #5C564F; }
+.text-warm-700 { color: #44403A; }
+.text-warm-800 { color: #2D2A26; }
+
+/* Hover utilities */
+.hover\:bg-warm-100:hover { background-color: #F5F3F0; }
+.hover\:border-warm-300:hover { border-color: #D4CEC4; }
+.hover\:text-warm-800:hover { color: #2D2A26; }
+
+/* Placeholder */
+.placeholder-warm-500::placeholder { color: #78706A; }

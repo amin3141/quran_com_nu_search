@@ -38,29 +38,24 @@ export function DirectHitCard({ result }: DirectHitCardProps) {
 
 function PostCard({ post }: { post: PostResult }) {
   return (
-    <a
-      href={post.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow"
-    >
+    <div className="bg-white rounded-xl shadow-md border border-warm-200 overflow-hidden">
       <div className="p-5">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-            <MessageSquare className="w-5 h-5 text-blue-600" />
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#E8E4DE' }}>
+            <MessageSquare className="w-5 h-5" style={{ color: '#8B6F5C' }} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm font-semibold text-gray-900">
+              <span className="text-sm font-semibold text-warm-800">
                 {post.display_name}
               </span>
-              <span className="text-sm text-gray-500">@{post.username}</span>
-              <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+              <span className="text-sm text-warm-500">@{post.username}</span>
+              <span className="px-2 py-0.5 text-xs font-medium rounded-full" style={{ backgroundColor: '#F5F3F0', color: '#8B6F5C' }}>
                 Reflection
               </span>
             </div>
-            <p className="text-gray-700 leading-relaxed">{post.text}</p>
-            <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
+            <p className="text-warm-700 leading-relaxed select-text">{post.text}</p>
+            <div className="flex items-center gap-4 mt-3 text-sm text-warm-500">
               <span className="flex items-center gap-1">
                 <Heart className="w-4 h-4" />
                 {post.likes_count}
@@ -77,39 +72,47 @@ function PostCard({ post }: { post: PostResult }) {
               )}
             </div>
           </div>
-          <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <a
+            href={post.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-lg hover:bg-warm-100 transition-colors flex-shrink-0"
+            title="Open in new tab"
+          >
+            <ExternalLink className="w-4 h-4 text-warm-400" />
+          </a>
         </div>
       </div>
-    </a>
+    </div>
   );
 }
 
 function CourseCard({ course }: { course: CourseResult }) {
   return (
-    <a
-      href={course.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow"
-    >
+    <div className="bg-white rounded-xl shadow-md border border-warm-200 overflow-hidden">
       <div className="p-5">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
-            <GraduationCap className="w-5 h-5 text-purple-600" />
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#E8E4DE' }}>
+            <GraduationCap className="w-5 h-5" style={{ color: '#4A7C6F' }} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
+              <span className="px-2 py-0.5 text-xs font-medium rounded-full" style={{ backgroundColor: '#E8F5F1', color: '#4A7C6F' }}>
                 Course
               </span>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-1">
+            <a
+              href={course.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-lg font-semibold text-warm-800 mb-1 hover:underline block"
+            >
               {course.course_title}
-            </h3>
-            <p className="text-sm text-[--color-primary] font-medium mb-2">
+            </a>
+            <p className="text-sm font-medium mb-2" style={{ color: '#8B6F5C' }}>
               Lesson: {course.lesson_title}
             </p>
-            <p className="text-gray-600 text-sm leading-relaxed line-clamp-2">
+            <p className="text-warm-600 text-sm leading-relaxed select-text">
               {course.text}
             </p>
             {course.tags.length > 0 && (
@@ -117,7 +120,7 @@ function CourseCard({ course }: { course: CourseResult }) {
                 {course.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full"
+                    className="px-2 py-0.5 text-xs bg-warm-100 text-warm-600 rounded-full"
                   >
                     {tag}
                   </span>
@@ -125,42 +128,58 @@ function CourseCard({ course }: { course: CourseResult }) {
               </div>
             )}
           </div>
-          <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <a
+            href={course.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-lg hover:bg-warm-100 transition-colors flex-shrink-0"
+            title="Open in new tab"
+          >
+            <ExternalLink className="w-4 h-4 text-warm-400" />
+          </a>
         </div>
       </div>
-    </a>
+    </div>
   );
 }
 
 function ArticleCard({ article }: { article: ArticleResult }) {
   return (
-    <a
-      href={article.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow"
-    >
+    <div className="bg-white rounded-xl shadow-md border border-warm-200 overflow-hidden">
       <div className="p-5">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-green-600" />
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#FDF8E8' }}>
+            <FileText className="w-5 h-5" style={{ color: '#C9A86C' }} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+              <span className="px-2 py-0.5 text-xs font-medium rounded-full" style={{ backgroundColor: '#FDF8E8', color: '#A68B4B' }}>
                 Article
               </span>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-lg font-semibold text-warm-800 mb-2 hover:underline block"
+            >
               {article.title}
-            </h3>
-            <p className="text-gray-600 text-sm leading-relaxed line-clamp-3">
+            </a>
+            <p className="text-warm-600 text-sm leading-relaxed select-text">
               {article.text}
             </p>
           </div>
-          <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <a
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-lg hover:bg-warm-100 transition-colors flex-shrink-0"
+            title="Open in new tab"
+          >
+            <ExternalLink className="w-4 h-4 text-warm-400" />
+          </a>
         </div>
       </div>
-    </a>
+    </div>
   );
 }

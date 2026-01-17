@@ -64,6 +64,30 @@ frontend/
 └── ...
 ```
 
+## Backend (Java/Javalin)
+
+The server lives in `server/` and proxies GoodMem into the response format the UI expects.
+
+### Run
+
+```bash
+cd server
+export GOODMEM_API_KEY=gm_***
+export GOODMEM_INSECURE_SSL=true
+gradle run
+```
+
+The server defaults to `http://localhost:7070` and exposes `GET /api/search`.
+
+### Environment
+
+- `GOODMEM_BASE_URL` (default `https://omni-dev.quran.ai:8080`)
+- `GOODMEM_API_KEY` (required)
+- `GOODMEM_INSECURE_SSL` (default `true` for self-signed TLS)
+- `GOODMEM_SPACE_IDS` (optional, `quran=...,translation=...` etc)
+- `SEARCH_DEFAULT_LANGUAGE` (default `en`)
+- `SEARCH_LIMIT_QURAN`, `SEARCH_LIMIT_TRANSLATION`, `SEARCH_LIMIT_TAFSIR`, `SEARCH_LIMIT_POST`, `SEARCH_LIMIT_COURSE`, `SEARCH_LIMIT_ARTICLE`
+
 ## Example Queries
 
 Try these searches to see different result types:
@@ -81,11 +105,11 @@ Try these searches to see different result types:
 - Tailwind CSS v4
 - Lucide React (icons)
 
-## Future Integration
+## GoodMem Integration
 
-This PoC uses mock data. For production, integrate with the GoodMem API:
+The frontend attempts to call `/api/search` and falls back to mock data if the backend is not running. The backend proxies GoodMem:
 
 - REST API: `https://omni-dev.quran.ai:8080`
 - gRPC API: `https://omni-dev.quran.ai:9090`
 
-The mock data structure matches the expected GoodMem response format for easy integration.
+The response structure matches the UI types so the mock data and live search stay interchangeable.

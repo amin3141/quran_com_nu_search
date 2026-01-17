@@ -3,21 +3,33 @@ import { Header, SearchBox, QuickActions, SearchResults } from './components';
 import { mockSearch } from './data/mockData';
 import type { SearchResponse } from './types';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+
 function App() {
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  const handleSearch = useCallback((query: string) => {
+  const handleSearch = useCallback(async (query: string) => {
     setIsLoading(true);
     setHasSearched(true);
 
-    // Simulate API delay
-    setTimeout(() => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/search?query=${encodeURIComponent(query)}`
+      );
+      if (!response.ok) {
+        throw new Error(`Search request failed (${response.status})`);
+      }
+      const results = (await response.json()) as SearchResponse;
+      setSearchResults(results);
+    } catch (error) {
+      console.warn('Search API failed, falling back to mock data', error);
       const results = mockSearch(query);
       setSearchResults(results);
+    } finally {
       setIsLoading(false);
-    }, 500);
+    }
   }, []);
 
   return (
