@@ -66,7 +66,7 @@ function App() {
         </section>
 
         {/* Search results */}
-        <section className="px-4 sm:px-6 lg:px-8">
+        <section className="px-2 sm:px-4 lg:px-8">
           <SearchResults results={searchResults} isLoading={isLoading} />
         </section>
 

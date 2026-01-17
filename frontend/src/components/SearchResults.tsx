@@ -42,8 +42,12 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
     );
   }
 
+  const courses = results.directHits.filter((hit) => hit.type === 'course');
+  const otherHits = results.directHits.filter((hit) => hit.type !== 'course');
+  const hasCourses = courses.length > 0;
+
   return (
-    <div className="w-full max-w-4xl mx-auto mt-8 pb-12">
+    <div className="w-full max-w-6xl mx-auto mt-8 pb-12">
       {/* Results header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
@@ -57,39 +61,54 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
         </span>
       </div>
 
-      {/* Ayah-centric results */}
-      {results.ayahResults.length > 0 && (
-        <div className="mb-8">
-          <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
-            Quranic Verses
-          </h3>
-          <div className="space-y-4">
-            {results.ayahResults.map((ayah) => (
-              <AyahCard key={ayah.ayah_key} result={ayah} />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Two-column layout: main content + courses sidebar */}
+      <div className={`flex flex-col ${hasCourses ? 'lg:flex-row lg:gap-6' : ''}`}>
+        {/* Main content column */}
+        <div className={hasCourses ? 'lg:flex-1 lg:min-w-0' : 'w-full max-w-4xl'}>
+          {/* Ayah-centric results */}
+          {results.ayahResults.length > 0 && (
+            <div className="mb-8">
+              <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
+                Quranic Verses
+              </h3>
+              <div className="space-y-4">
+                {results.ayahResults.map((ayah) => (
+                  <AyahCard key={ayah.ayah_key} result={ayah} />
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* Direct content hits */}
-      {results.directHits.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
-            Related Content
-          </h3>
-          <div className="space-y-4">
-            {results.directHits.map((hit) => {
-              const key =
-                hit.type === 'post'
-                  ? hit.post_id
-                  : hit.type === 'course'
-                    ? hit.course_id
-                    : hit.slug;
-              return <DirectHitCard key={key} result={hit} />;
-            })}
-          </div>
+          {/* Posts and articles */}
+          {otherHits.length > 0 && (
+            <div className="mb-8 lg:mb-0">
+              <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
+                Related Content
+              </h3>
+              <div className="space-y-4">
+                {otherHits.map((hit) => {
+                  const key = hit.type === 'post' ? hit.post_id : hit.slug;
+                  return <DirectHitCard key={key} result={hit} />;
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Courses sidebar */}
+        {hasCourses && (
+          <div className="lg:w-80 flex-shrink-0">
+            <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
+              Courses
+            </h3>
+            <div className="space-y-4">
+              {courses.map((hit) => (
+                <DirectHitCard key={hit.course_id} result={hit} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
