@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Header, SearchBox, QuickActions, SearchResults } from './components';
+import { Header, SearchBox, SearchResults } from './components';
 import { mockSearch } from './data/mockData';
 import type { SearchResponse } from './types';
 
@@ -59,9 +59,6 @@ function App() {
 
             {/* Search box */}
             <SearchBox onSearch={handleSearch} isLoading={isLoading} />
-
-            {/* Quick actions - hide after search */}
-            {!hasSearched && <QuickActions onAction={handleSearch} />}
           </div>
         </section>
 
