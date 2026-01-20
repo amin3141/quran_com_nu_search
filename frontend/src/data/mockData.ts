@@ -7,6 +7,8 @@ import type {
   ArticleResult,
   SearchResponse,
   ConsolidatedAyahResult,
+  PostCategory,
+  SpaceType,
 } from '../types';
 
 // Ayat al-Kursi (2:255)
@@ -301,8 +303,92 @@ function createConsolidatedAyah(
   };
 }
 
+function filterResultsBySpaces(
+  results: SearchResponse,
+  spaces?: SpaceType[],
+  postCategory?: PostCategory | null
+): SearchResponse {
+  if (!spaces || spaces.length === 0) {
+    return results;
+  }
+
+  const spaceSet = new Set(spaces);
+  const showQuran = spaceSet.has('quran');
+  const showTranslation = spaceSet.has('translation');
+  const showTafsir = spaceSet.has('tafsir');
+  const showPost = spaceSet.has('post');
+  const showCourse = spaceSet.has('course');
+  const showArticle = spaceSet.has('article');
+  const activePostCategory = showPost ? postCategory : null;
+
+  const directHits = results.directHits.filter((hit) => {
+    if (hit.type === 'post') {
+      if (!showPost) return false;
+      if (activePostCategory === 'reflection') {
+        return hit.category === 'reflection';
+      }
+      return true;
+    }
+    if (hit.type === 'course') return showCourse;
+    if (hit.type === 'article') return showArticle;
+    return true;
+  });
+
+  const ayahResults = results.ayahResults
+    .map((ayah) => {
+      const quran = showQuran ? ayah.quran : null;
+      const translations = showTranslation ? ayah.translations : [];
+      const tafsirs = showTafsir ? ayah.tafsirs : [];
+      const posts = showPost
+        ? ayah.posts.filter((post) =>
+            activePostCategory === 'reflection' ? post.category === 'reflection' : true
+          )
+        : [];
+      const courses = showCourse ? ayah.courses : [];
+      const articles = showArticle ? ayah.articles : [];
+      const scores: number[] = [];
+      if (quran) scores.push(quran.score);
+      if (translations.length > 0) scores.push(...translations.map((t) => t.score));
+      if (tafsirs.length > 0) scores.push(...tafsirs.map((t) => t.score));
+      if (posts.length > 0) scores.push(...posts.map((p) => p.score));
+      if (courses.length > 0) scores.push(...courses.map((c) => c.score));
+      if (articles.length > 0) scores.push(...articles.map((a) => a.score));
+
+      return {
+        ...ayah,
+        quran,
+        translations,
+        tafsirs,
+        posts,
+        courses,
+        articles,
+        topScore: scores.length > 0 ? Math.max(...scores) : 0,
+      };
+    })
+    .filter((ayah) => {
+      return (
+        Boolean(ayah.quran) ||
+        ayah.translations.length > 0 ||
+        ayah.tafsirs.length > 0 ||
+        ayah.posts.length > 0 ||
+        ayah.courses.length > 0 ||
+        ayah.articles.length > 0
+      );
+    });
+
+  return {
+    ...results,
+    directHits,
+    ayahResults,
+  };
+}
+
 // Mock search function
-export function mockSearch(query: string): SearchResponse {
+export function mockSearch(
+  query: string,
+  spaces?: SpaceType[],
+  postCategory?: PostCategory | null
+): SearchResponse {
   const lowerQuery = query.toLowerCase();
   const results: SearchResponse = {
     query,
@@ -491,14 +577,16 @@ export function mockSearch(query: string): SearchResponse {
     return true;
   });
 
+  const filteredResults = filterResultsBySpaces(results, spaces, postCategory);
+
   // Sort by score
-  results.directHits.sort((a, b) => b.score - a.score);
-  results.ayahResults.sort((a, b) => b.topScore - a.topScore);
+  filteredResults.directHits.sort((a, b) => b.score - a.score);
+  filteredResults.ayahResults.sort((a, b) => b.topScore - a.topScore);
 
-  results.totalResults =
-    results.directHits.length + results.ayahResults.length;
+  filteredResults.totalResults =
+    filteredResults.directHits.length + filteredResults.ayahResults.length;
 
-  return results;
+  return filteredResults;
 }
 
 // Surah names for display

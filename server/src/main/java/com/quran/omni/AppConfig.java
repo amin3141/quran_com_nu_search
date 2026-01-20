@@ -15,7 +15,10 @@ public record AppConfig(
     Map<SpaceType, String> spaceIdOverrides,
     Map<SpaceType, Integer> spaceLimits,
     String defaultLanguage,
-    Duration spaceCacheTtl
+    Duration spaceCacheTtl,
+    String rerankerId,
+    int rerankCandidateSize,
+    boolean rerankChronologicalResort
 ) {
     public static AppConfig fromEnv() {
         int port = readIntEnv("PORT", 7070);
@@ -62,6 +65,9 @@ public record AppConfig(
 
         String defaultLanguage = readEnv("SEARCH_DEFAULT_LANGUAGE", "en").toLowerCase(Locale.ROOT);
         Duration spaceCacheTtl = Duration.ofSeconds(readIntEnv("SPACE_CACHE_TTL_SECONDS", 600));
+        String rerankerId = readEnv("SEARCH_RERANKER_ID", "019bd887-2953-7562-92b8-964abb5bffa4");
+        int rerankCandidateSize = readIntEnv("SEARCH_RERANK_CANDIDATES", 100);
+        boolean rerankChronologicalResort = readBoolEnv("SEARCH_RERANK_CHRONOLOGICAL_RESORT", false);
 
         return new AppConfig(
             port,
@@ -71,7 +77,10 @@ public record AppConfig(
             spaceIdOverrides,
             spaceLimits,
             defaultLanguage,
-            spaceCacheTtl
+            spaceCacheTtl,
+            rerankerId,
+            rerankCandidateSize,
+            rerankChronologicalResort
         );
     }
 

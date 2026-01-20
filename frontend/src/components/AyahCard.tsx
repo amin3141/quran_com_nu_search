@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -8,11 +8,13 @@ import {
   FileText,
   ExternalLink,
 } from 'lucide-react';
-import type { ConsolidatedAyahResult } from '../types';
+import type { ConsolidatedAyahResult, PostCategory, SpaceType } from '../types';
 import { surahNames } from '../data/mockData';
 
 interface AyahCardProps {
   result: ConsolidatedAyahResult;
+  visibleSpaces: SpaceType[];
+  postCategory: PostCategory | null;
 }
 
 // Verses that are Huruf Muqatta'at (mysterious letters)
@@ -33,8 +35,11 @@ function toArabicNumerals(num: number): string {
     .join('');
 }
 
-export function AyahCard({ result }: AyahCardProps) {
+export function AyahCard({ result, visibleSpaces, postCategory }: AyahCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [tafsirExpanded, setTafsirExpanded] = useState(false);
+  const [isTafsirTruncated, setIsTafsirTruncated] = useState(false);
+  const tafsirRef = useRef<HTMLParagraphElement | null>(null);
 
   const surahInfo = surahNames[result.surah] || {
     arabic: '',
@@ -44,14 +49,52 @@ export function AyahCard({ result }: AyahCardProps) {
 
   const isHurufMuqattaat = HURUF_MUQATTAAT_VERSES.has(result.ayah_key);
 
+  const visibleSet = new Set(visibleSpaces);
+  const showTranslations = visibleSet.has('translation');
+  const showTafsirs = visibleSet.has('tafsir');
+  const showPosts = visibleSet.has('post');
+  const showCourses = visibleSet.has('course');
+  const showArticles = visibleSet.has('article');
+
+  const translations = showTranslations ? result.translations : [];
+  const tafsirs = showTafsirs ? result.tafsirs : [];
+  const tafsirText = tafsirs.length > 0 ? tafsirs[0].text : '';
+  const posts = showPosts
+    ? result.posts.filter((post) =>
+        postCategory === 'reflection' ? post.category === 'reflection' : true
+      )
+    : [];
+  const courses = showCourses ? result.courses : [];
+  const articles = showArticles ? result.articles : [];
+
   // Count only items shown in expandable section (not tafsirs - they're shown separately)
   // Extra translations (beyond the first) are also shown in expanded section
-  const extraTranslations = Math.max(0, result.translations.length - 1);
+  const extraTranslations = showTranslations
+    ? Math.max(0, translations.length - 1)
+    : 0;
   const totalRelated =
-    result.posts.length +
-    result.courses.length +
-    result.articles.length +
+    posts.length +
+    courses.length +
+    articles.length +
     extraTranslations;
+
+  useEffect(() => {
+    if (!showTafsirs || !tafsirText) {
+      setIsTafsirTruncated(false);
+      return;
+    }
+    if (tafsirExpanded) {
+      return;
+    }
+    const element = tafsirRef.current;
+    if (!element) {
+      return;
+    }
+    const hasOverflow = element.scrollHeight > element.clientHeight + 1;
+    setIsTafsirTruncated(hasOverflow);
+  }, [showTafsirs, tafsirExpanded, tafsirText]);
+
+  const canExpandTafsir = isTafsirTruncated || tafsirExpanded;
 
   // End of ayah marker with Arabic numerals
   const ayahMarker = `\u06DD${toArabicNumerals(result.ayah)}`; // ۝ + number
@@ -116,45 +159,63 @@ export function AyahCard({ result }: AyahCardProps) {
       </div>
 
       {/* Best translation */}
-      {result.translations.length > 0 ? (
-        <div className="px-5 py-4 border-b border-warm-200 bg-warm-50">
-          <div className="flex items-start gap-3">
-            <BookOpen className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#8B6F5C' }} />
-            <div className="flex-1">
-              <p className="text-warm-700 leading-relaxed">
-                {result.translations[0].text}
-              </p>
-              <p className="text-sm text-warm-500 mt-2">
-                — {result.translations[0].author}
-              </p>
+      {showTranslations && (
+        <>
+          {translations.length > 0 ? (
+            <div className="px-5 py-4 border-b border-warm-200 bg-warm-50">
+              <div className="flex items-start gap-3">
+                <BookOpen className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#8B6F5C' }} />
+                <div className="flex-1">
+                  <p className="text-warm-700 leading-relaxed">
+                    {translations[0].text}
+                  </p>
+                  <p className="text-sm text-warm-500 mt-2">
+                    — {translations[0].author}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      ) : (
-        <div className="px-5 py-3 border-b border-warm-200 bg-warm-50">
-          <div className="flex items-start gap-3">
-            <BookOpen className="w-5 h-5 text-warm-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-warm-500 italic">
-              {isHurufMuqattaat
-                ? 'These letters (Huruf Muqatta\'at) appear at the beginning of certain surahs. Their meaning is known only to Allah.'
-                : 'No translation available for this verse.'}
-            </p>
-          </div>
-        </div>
+          ) : (
+            <div className="px-5 py-3 border-b border-warm-200 bg-warm-50">
+              <div className="flex items-start gap-3">
+                <BookOpen className="w-5 h-5 text-warm-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-warm-500 italic">
+                  {isHurufMuqattaat
+                    ? 'These letters (Huruf Muqatta\'at) appear at the beginning of certain surahs. Their meaning is known only to Allah.'
+                    : 'No translation available for this verse.'}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Tafsir excerpt (if available) */}
-      {result.tafsirs.length > 0 && (
+      {showTafsirs && tafsirs.length > 0 && (
         <div className="px-5 py-4 border-b border-warm-200">
           <div className="flex items-start gap-3">
             <MessageSquare className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#4A7C6F' }} />
             <div className="flex-1">
               <p className="text-sm font-medium text-warm-700 mb-1">
-                Tafsir: {result.tafsirs[0].name}
+                Tafsir: {tafsirs[0].name}
               </p>
-              <p className="text-warm-600 text-sm leading-relaxed line-clamp-3">
-                {result.tafsirs[0].text}
+              <p
+                ref={tafsirRef}
+                className={`text-warm-600 text-sm leading-relaxed ${
+                  tafsirExpanded ? 'line-clamp-none' : 'line-clamp-3'
+                }`}
+              >
+                {tafsirText}
               </p>
+              {canExpandTafsir && (
+                <button
+                  type="button"
+                  onClick={() => setTafsirExpanded((prev) => !prev)}
+                  className="mt-2 text-xs font-medium text-warm-600 hover:text-warm-800 transition-colors"
+                >
+                  {tafsirExpanded ? 'Show less' : 'Show more'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -172,9 +233,9 @@ export function AyahCard({ result }: AyahCardProps) {
               {totalRelated === 1 ? 'item' : 'items'}
               <span className="text-warm-500 font-normal ml-2">
                 ({[
-                  result.posts.length > 0 && `${result.posts.length} posts`,
-                  result.courses.length > 0 && `${result.courses.length} courses`,
-                  result.articles.length > 0 && `${result.articles.length} articles`,
+                  posts.length > 0 && `${posts.length} posts`,
+                  courses.length > 0 && `${courses.length} courses`,
+                  articles.length > 0 && `${articles.length} articles`,
                   extraTranslations > 0 && `${extraTranslations} more translations`,
                 ].filter(Boolean).join(', ')})
               </span>
@@ -190,7 +251,7 @@ export function AyahCard({ result }: AyahCardProps) {
           {expanded && (
             <div className="mt-4 space-y-3">
               {/* Posts */}
-              {result.posts.map((post) => (
+              {posts.map((post) => (
                 <a
                   key={post.post_id}
                   href={post.url}
@@ -213,7 +274,7 @@ export function AyahCard({ result }: AyahCardProps) {
               ))}
 
               {/* Courses */}
-              {result.courses.map((course) => (
+              {courses.map((course) => (
                 <a
                   key={course.course_id}
                   href={course.url}
@@ -236,7 +297,7 @@ export function AyahCard({ result }: AyahCardProps) {
               ))}
 
               {/* Articles */}
-              {result.articles.map((article) => (
+              {articles.map((article) => (
                 <a
                   key={article.slug}
                   href={article.url}
@@ -259,12 +320,12 @@ export function AyahCard({ result }: AyahCardProps) {
               ))}
 
               {/* Additional translations */}
-              {result.translations.length > 1 && (
+              {showTranslations && translations.length > 1 && (
                 <div className="pt-2 border-t border-warm-200">
                   <p className="text-xs font-medium text-warm-500 uppercase tracking-wide mb-2">
                     Other Translations
                   </p>
-                  {result.translations.slice(1).map((translation, idx) => (
+                  {translations.slice(1).map((translation, idx) => (
                     <a
                       key={idx}
                       href={translation.url}

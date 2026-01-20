@@ -32,15 +32,23 @@ import org.slf4j.LoggerFactory;
 
 public final class GoodMemClient {
     private static final Logger logger = LoggerFactory.getLogger(GoodMemClient.class);
+    private static final String POST_PROCESSOR_FACTORY =
+        "com.goodmem.retrieval.postprocess.ChatPostProcessorFactory";
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient httpClient;
     private final String baseUrl;
     private final String apiKey;
+    private final String rerankerId;
+    private final int rerankCandidateSize;
+    private final boolean rerankChronologicalResort;
 
     public GoodMemClient(AppConfig config) {
         this.baseUrl = config.goodMemBaseUrl();
         this.apiKey = config.goodMemApiKey();
+        this.rerankerId = config.rerankerId();
+        this.rerankCandidateSize = config.rerankCandidateSize();
+        this.rerankChronologicalResort = config.rerankChronologicalResort();
         this.httpClient = buildClient(config.goodMemInsecureSsl());
     }
 
@@ -83,7 +91,11 @@ public final class GoodMemClient {
 
         ObjectNode payload = mapper.createObjectNode();
         payload.put("message", query);
-        payload.put("requestedSize", limit);
+        int requestedSize = limit;
+        if (shouldApplyReranker(filter)) {
+            requestedSize = Math.max(limit, resolveRerankCandidateSize());
+        }
+        payload.put("requestedSize", requestedSize);
         payload.put("fetchMemory", true);
         payload.put("fetchMemoryContent", false);
 
@@ -92,6 +104,14 @@ public final class GoodMemClient {
         spaceKey.put("spaceId", spaceId);
         if (filter != null && !filter.isBlank()) {
             spaceKey.put("filter", filter);
+        }
+        if (shouldApplyReranker(filter)) {
+            ObjectNode postProcessor = payload.putObject("postProcessor");
+            postProcessor.put("name", POST_PROCESSOR_FACTORY);
+            ObjectNode config = postProcessor.putObject("config");
+            config.put("reranker_id", rerankerId);
+            config.put("max_results", limit);
+            config.put("chronological_resort", rerankChronologicalResort);
         }
 
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/memories:retrieve"))
@@ -164,6 +184,19 @@ public final class GoodMemClient {
         }
 
         return hits;
+    }
+
+    private boolean shouldApplyReranker(String filter) {
+        return rerankerId != null
+            && !rerankerId.isBlank()
+            && (filter == null || filter.isBlank());
+    }
+
+    private int resolveRerankCandidateSize() {
+        if (rerankCandidateSize > 0) {
+            return rerankCandidateSize;
+        }
+        return 100;
     }
 
     private static double normalizeScore(double relevanceScore) {

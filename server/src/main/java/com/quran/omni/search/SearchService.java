@@ -55,6 +55,7 @@ public final class SearchService {
         final String resolvedLanguage = language.toLowerCase(Locale.ROOT);
 
         EnumSet<SpaceType> requestedSpaces = parseSpaces(request.spaces());
+        requestedSpaces.add(SpaceType.QURAN);
         Map<SpaceType, String> spaceIds = spaceRegistry.resolve();
 
         List<CompletableFuture<List<MemoryHit>>> futures = new ArrayList<>();
@@ -143,8 +144,12 @@ public final class SearchService {
             }
         }
 
-        ensureQuranText(query, spaceIds, ayahMap);
-        ensureTranslations(ayahMap);
+        if (requestedSpaces.contains(SpaceType.QURAN)) {
+            ensureQuranText(query, spaceIds, ayahMap);
+        }
+        if (requestedSpaces.contains(SpaceType.TRANSLATION)) {
+            ensureTranslations(ayahMap);
+        }
 
         List<Models.ConsolidatedAyahResult> ayahResults = ayahMap.values().stream()
             .map(aggregate -> aggregate.toResult(resolvedLanguage))
@@ -371,7 +376,7 @@ public final class SearchService {
         if (author == null || author.isBlank()) {
             author = getString(meta, "name");
         }
-        String text = TextCleaner.cleanSnippet(hit.text(), 400);
+        String text = TextCleaner.cleanSnippet(hit.text(), 0);
         return new Models.TafsirResult(
             "tafsir",
             parts.ayah,

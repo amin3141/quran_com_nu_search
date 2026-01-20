@@ -87,6 +87,9 @@ The server defaults to `http://localhost:7070` and exposes `GET /api/search`.
 - `GOODMEM_SPACE_IDS` (optional, `quran=...,translation=...` etc)
 - `SEARCH_DEFAULT_LANGUAGE` (default `en`)
 - `SEARCH_LIMIT_QURAN`, `SEARCH_LIMIT_TRANSLATION`, `SEARCH_LIMIT_TAFSIR`, `SEARCH_LIMIT_POST`, `SEARCH_LIMIT_COURSE`, `SEARCH_LIMIT_ARTICLE`
+- `SEARCH_RERANKER_ID` (default `019bd887-2953-7562-92b8-964abb5bffa4`)
+- `SEARCH_RERANK_CANDIDATES` (default `100`)
+- `SEARCH_RERANK_CHRONOLOGICAL_RESORT` (default `false`)
 
 ### Railway
 

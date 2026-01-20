@@ -1,4 +1,5 @@
 export type SpaceType = 'quran' | 'translation' | 'tafsir' | 'post' | 'course' | 'article';
+export type PostCategory = 'reflection';
 
 export interface QuranResult {
   type: 'quran';
@@ -113,4 +114,5 @@ export interface SearchResponse {
 export interface FilterOptions {
   spaces: SpaceType[];
   language: string;
+  postCategory?: PostCategory | null;
 }

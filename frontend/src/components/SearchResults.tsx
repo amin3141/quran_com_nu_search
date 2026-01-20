@@ -1,14 +1,21 @@
 import { AyahCard } from './AyahCard';
 import { DirectHitCard } from './DirectHitCard';
-import type { SearchResponse } from '../types';
+import type { PostCategory, SearchResponse, SpaceType } from '../types';
 import { BookOpen, Sparkles } from 'lucide-react';
 
 interface SearchResultsProps {
   results: SearchResponse | null;
   isLoading: boolean;
+  activeSpaces: SpaceType[];
+  postCategory: PostCategory | null;
 }
 
-export function SearchResults({ results, isLoading }: SearchResultsProps) {
+export function SearchResults({
+  results,
+  isLoading,
+  activeSpaces,
+  postCategory,
+}: SearchResultsProps) {
   if (isLoading) {
     return (
       <div className="w-full max-w-4xl mx-auto mt-8">
@@ -26,7 +33,30 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
     return null;
   }
 
-  if (results.totalResults === 0) {
+  const spaceSet = new Set(activeSpaces);
+  const showQuran = spaceSet.has('quran');
+  const showPosts = spaceSet.has('post');
+  const showCourses = spaceSet.has('course');
+  const showArticles = spaceSet.has('article');
+  const activePostCategory = showPosts ? postCategory : null;
+
+  const filteredDirectHits = results.directHits.filter((hit) => {
+    if (hit.type === 'course') return showCourses;
+    if (hit.type === 'post') {
+      if (!showPosts) return false;
+      if (activePostCategory === 'reflection') {
+        return hit.category === 'reflection';
+      }
+      return true;
+    }
+    if (hit.type === 'article') return showArticles;
+    return true;
+  });
+
+  const ayahResults = showQuran ? results.ayahResults : [];
+  const displayTotal = filteredDirectHits.length + ayahResults.length;
+
+  if (displayTotal === 0) {
     return (
       <div className="w-full max-w-4xl mx-auto mt-8">
         <div className="text-center py-12">
@@ -42,9 +72,9 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
     );
   }
 
-  const courses = results.directHits.filter((hit) => hit.type === 'course');
-  const otherHits = results.directHits.filter((hit) => hit.type !== 'course');
-  const hasCourses = courses.length > 0;
+  const courses = filteredDirectHits.filter((hit) => hit.type === 'course');
+  const otherHits = filteredDirectHits.filter((hit) => hit.type !== 'course');
+  const hasCourses = courses.length > 0 && showCourses;
 
   return (
     <div className="w-full max-w-6xl mx-auto mt-8 pb-12">
@@ -57,7 +87,7 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
           </h2>
         </div>
         <span className="text-sm text-warm-500">
-          {results.totalResults} {results.totalResults === 1 ? 'result' : 'results'}
+          {displayTotal} {displayTotal === 1 ? 'result' : 'results'}
         </span>
       </div>
 
@@ -66,14 +96,19 @@ export function SearchResults({ results, isLoading }: SearchResultsProps) {
         {/* Main content column */}
         <div className={hasCourses ? 'lg:flex-1 lg:min-w-0' : 'w-full max-w-4xl'}>
           {/* Ayah-centric results */}
-          {results.ayahResults.length > 0 && (
+          {ayahResults.length > 0 && (
             <div className="mb-8">
               <h3 className="text-sm font-semibold text-warm-500 uppercase tracking-wide mb-4">
                 Quranic Verses
               </h3>
               <div className="space-y-4">
-                {results.ayahResults.map((ayah) => (
-                  <AyahCard key={ayah.ayah_key} result={ayah} />
+                {ayahResults.map((ayah) => (
+                  <AyahCard
+                    key={ayah.ayah_key}
+                    result={ayah}
+                    visibleSpaces={activeSpaces}
+                    postCategory={activePostCategory}
+                  />
                 ))}
               </div>
             </div>

@@ -1,20 +1,47 @@
 import { useState, useCallback } from 'react';
 import { Search, SlidersHorizontal, ArrowUp } from 'lucide-react';
+import type { PostCategory, SpaceType } from '../types';
 
 interface SearchBoxProps {
   onSearch: (query: string) => void;
   isLoading?: boolean;
+  query: string;
+  onQueryChange: (value: string) => void;
+  selectedSpaces: SpaceType[];
+  onToggleSpace: (space: SpaceType) => void;
+  postCategory: PostCategory | null;
+  onToggleReflection: () => void;
 }
 
-export function SearchBox({ onSearch, isLoading = false }: SearchBoxProps) {
-  const [query, setQuery] = useState('');
+const FILTER_OPTIONS: { label: string; value: SpaceType; alwaysOn?: boolean }[] = [
+  { label: 'Quran (always)', value: 'quran', alwaysOn: true },
+  { label: 'Translation', value: 'translation' },
+  { label: 'Tafsir', value: 'tafsir' },
+  { label: 'Posts', value: 'post' },
+  { label: 'Courses', value: 'course' },
+  { label: 'Articles', value: 'article' },
+];
+
+export function SearchBox({
+  onSearch,
+  isLoading = false,
+  query,
+  onQueryChange,
+  selectedSpaces,
+  onToggleSpace,
+  postCategory,
+  onToggleReflection,
+}: SearchBoxProps) {
   const [showFilters, setShowFilters] = useState(false);
+  const hasPosts = selectedSpaces.includes('post');
+  const isReflectionOnly = postCategory === 'reflection';
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (query.trim()) {
-        onSearch(query.trim());
+      const normalizedQuery = query.trim();
+      if (normalizedQuery) {
+        onSearch(normalizedQuery);
       }
     },
     [query, onSearch]
@@ -24,8 +51,9 @@ export function SearchBox({ onSearch, isLoading = false }: SearchBoxProps) {
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (query.trim()) {
-          onSearch(query.trim());
+        const normalizedQuery = query.trim();
+        if (normalizedQuery) {
+          onSearch(normalizedQuery);
         }
       }
     },
@@ -50,7 +78,7 @@ export function SearchBox({ onSearch, isLoading = false }: SearchBoxProps) {
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => onQueryChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Search the Quran, translations, tafsir, and more..."
               className="flex-1 px-3 py-2 text-warm-800 placeholder-warm-500 bg-transparent border-none outline-none text-base"
@@ -90,17 +118,61 @@ export function SearchBox({ onSearch, isLoading = false }: SearchBoxProps) {
             Filter by content type
           </h4>
           <div className="flex flex-wrap gap-2">
-            {['Quran', 'Translation', 'Tafsir', 'Posts', 'Courses', 'Articles'].map(
-              (filter) => (
+            {FILTER_OPTIONS.map((filter) => {
+              const isActive =
+                filter.alwaysOn || selectedSpaces.includes(filter.value);
+              const isDisabled = Boolean(filter.alwaysOn);
+              return (
                 <button
-                  key={filter}
+                  key={filter.value}
                   type="button"
-                  className="px-3 py-1.5 text-sm font-medium rounded-full border border-warm-200 text-warm-700 hover:bg-warm-100 hover:border-warm-300 transition-colors"
+                  aria-pressed={isActive}
+                  aria-disabled={isDisabled}
+                  onClick={() => {
+                    if (!isDisabled) {
+                      onToggleSpace(filter.value);
+                    }
+                  }}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${
+                    isActive ? 'text-white' : 'text-warm-700 hover:bg-warm-100 hover:border-warm-300'
+                  } ${isDisabled ? 'cursor-default opacity-80' : ''}`}
+                  style={
+                    isActive
+                      ? { backgroundColor: '#8B6F5C', borderColor: '#8B6F5C' }
+                      : { backgroundColor: 'white', borderColor: '#E8E4DE' }
+                  }
                 >
-                  {filter}
+                  {filter.label}
                 </button>
-              )
-            )}
+              );
+            })}
+          </div>
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-warm-500 uppercase tracking-wide mb-2">
+              Post category
+            </p>
+            <button
+              type="button"
+              aria-pressed={isReflectionOnly}
+              aria-disabled={!hasPosts}
+              onClick={() => {
+                if (hasPosts) {
+                  onToggleReflection();
+                }
+              }}
+              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${
+                isReflectionOnly
+                  ? 'text-white'
+                  : 'text-warm-700 hover:bg-warm-100 hover:border-warm-300'
+              } ${!hasPosts ? 'cursor-not-allowed opacity-60' : ''}`}
+              style={
+                isReflectionOnly
+                  ? { backgroundColor: '#8B6F5C', borderColor: '#8B6F5C' }
+                  : { backgroundColor: 'white', borderColor: '#E8E4DE' }
+              }
+            >
+              Reflections
+            </button>
           </div>
         </div>
       )}
