@@ -58,6 +58,31 @@ public final class SearchService {
         requestedSpaces.add(SpaceType.QURAN);
         Map<SpaceType, String> spaceIds = spaceRegistry.resolve();
 
+        CompletableFuture<String> overviewFuture = null;
+        if (client.isOverviewEnabled()) {
+            EnumSet<SpaceType> overviewSpaces = EnumSet.of(
+                SpaceType.QURAN,
+                SpaceType.TRANSLATION,
+                SpaceType.TAFSIR
+            );
+            List<String> overviewSpaceIds = requestedSpaces.stream()
+                .filter(overviewSpaces::contains)
+                .map(spaceIds::get)
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+            if (!overviewSpaceIds.isEmpty()) {
+                overviewFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return client.generateOverview(query, overviewSpaceIds);
+                    } catch (Exception ex) {
+                        logger.warn("AI overview generation failed", ex);
+                        return null;
+                    }
+                }, executor);
+            }
+        }
+
         List<CompletableFuture<List<MemoryHit>>> futures = new ArrayList<>();
         for (SpaceType spaceType : requestedSpaces) {
             String spaceId = spaceIds.get(spaceType);
@@ -175,7 +200,19 @@ public final class SearchService {
             .collect(Collectors.toList());
 
         int totalResults = directHits.size() + ayahResults.size();
-        return new Models.SearchResponse(query, directHits, ayahResults, totalResults);
+        Models.AiOverview aiOverview = null;
+        if (overviewFuture != null) {
+            try {
+                String overviewText = overviewFuture.join();
+                if (overviewText != null && !overviewText.isBlank()) {
+                    aiOverview = new Models.AiOverview(overviewText);
+                }
+            } catch (Exception ex) {
+                logger.warn("AI overview resolution failed", ex);
+            }
+        }
+
+        return new Models.SearchResponse(query, aiOverview, directHits, ayahResults, totalResults);
     }
 
     public void shutdown() {

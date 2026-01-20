@@ -15,9 +15,14 @@ public final class Models {
 
     public record SearchResponse(
         String query,
+        AiOverview aiOverview,
         List<Object> directHits,
         List<ConsolidatedAyahResult> ayahResults,
         int totalResults
+    ) {}
+
+    public record AiOverview(
+        String text
     ) {}
 
     public record QuranResult(

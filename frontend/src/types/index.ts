@@ -91,6 +91,10 @@ export type SearchResult =
   | CourseResult
   | ArticleResult;
 
+export interface AiOverview {
+  text: string;
+}
+
 export interface ConsolidatedAyahResult {
   ayah_key: string;
   surah: number;
@@ -106,6 +110,7 @@ export interface ConsolidatedAyahResult {
 
 export interface SearchResponse {
   query: string;
+  aiOverview?: AiOverview | null;
   directHits: (PostResult | CourseResult | ArticleResult)[];
   ayahResults: ConsolidatedAyahResult[];
   totalResults: number;

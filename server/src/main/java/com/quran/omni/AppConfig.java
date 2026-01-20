@@ -18,8 +18,39 @@ public record AppConfig(
     Duration spaceCacheTtl,
     String rerankerId,
     int rerankCandidateSize,
-    boolean rerankChronologicalResort
+    boolean rerankChronologicalResort,
+    String overviewLlmId,
+    String overviewSysPrompt,
+    String overviewPrompt,
+    int overviewTokenBudget,
+    double overviewTemperature,
+    int overviewMaxResults,
+    int overviewCandidateSize,
+    Double overviewRelevanceThreshold
 ) {
+    private static final String DEFAULT_OVERVIEW_SYS_PROMPT = String.join("\n",
+        "You are an AI assistant generating a concise AI Overview for Quran.com search.",
+        "Use only the retrieved memory data. Do not add facts that are not present.",
+        "If the data is insufficient, say so plainly.",
+        "Keep the overview under 4 sentences. Avoid recommendations.",
+        "Do not use bracketed citations like [1] or [2].",
+        "Exclude reflection content; focus on Quran, translations, and tafsir."
+    );
+
+    private static final String DEFAULT_OVERVIEW_PROMPT = String.join("\n",
+        "User query: \"{{ userQuery }}\"",
+        "",
+        "Retrieved data:",
+        "{{ dataSection }}",
+        "",
+        "Write an AI overview that synthesizes the retrieved data and answers the query.",
+        "Use only Quran, translation, and tafsir content; ignore reflections or community posts.",
+        "After each factual assertion, add a brief verbatim snippet in quotes inside parentheses.",
+        "Use short quotes from Quran, translations, and tafsir (verbatim).",
+        "Do not use bracketed references like [1] or [2].",
+        "If sources disagree, mention that briefly with a quoted snippet."
+    );
+
     public static AppConfig fromEnv() {
         int port = readIntEnv("PORT", 7070);
         String baseUrl = readEnv("GOODMEM_BASE_URL", "https://omni-dev.quran.ai:8080");
@@ -69,6 +100,15 @@ public record AppConfig(
         int rerankCandidateSize = readIntEnv("SEARCH_RERANK_CANDIDATES", 100);
         boolean rerankChronologicalResort = readBoolEnv("SEARCH_RERANK_CHRONOLOGICAL_RESORT", false);
 
+        String overviewLlmId = readEnv("SEARCH_OVERVIEW_LLM_ID", "019bc775-3b20-767f-a15f-42cda8039b2c");
+        String overviewSysPrompt = readEnv("SEARCH_OVERVIEW_SYS_PROMPT", DEFAULT_OVERVIEW_SYS_PROMPT);
+        String overviewPrompt = readEnv("SEARCH_OVERVIEW_PROMPT", DEFAULT_OVERVIEW_PROMPT);
+        int overviewTokenBudget = readIntEnv("SEARCH_OVERVIEW_TOKEN_BUDGET", 256);
+        double overviewTemperature = readDoubleEnv("SEARCH_OVERVIEW_TEMP", 0.3);
+        int overviewMaxResults = readIntEnv("SEARCH_OVERVIEW_MAX_RESULTS", 8);
+        int overviewCandidateSize = readIntEnv("SEARCH_OVERVIEW_CANDIDATES", 24);
+        Double overviewRelevanceThreshold = readNullableDoubleEnv("SEARCH_OVERVIEW_RELEVANCE_THRESHOLD");
+
         return new AppConfig(
             port,
             baseUrl,
@@ -80,7 +120,15 @@ public record AppConfig(
             spaceCacheTtl,
             rerankerId,
             rerankCandidateSize,
-            rerankChronologicalResort
+            rerankChronologicalResort,
+            overviewLlmId,
+            overviewSysPrompt,
+            overviewPrompt,
+            overviewTokenBudget,
+            overviewTemperature,
+            overviewMaxResults,
+            overviewCandidateSize,
+            overviewRelevanceThreshold
         );
     }
 
@@ -101,6 +149,30 @@ public record AppConfig(
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException ignored) {
             return fallback;
+        }
+    }
+
+    private static double readDoubleEnv(String key, double fallback) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static Double readNullableDoubleEnv(String key) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 

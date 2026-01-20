@@ -1,7 +1,8 @@
 import { AyahCard } from './AyahCard';
+import { AiOverview } from './AiOverview';
 import { DirectHitCard } from './DirectHitCard';
 import type { PostCategory, SearchResponse, SpaceType } from '../types';
-import { BookOpen, Sparkles } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
 
 interface SearchResultsProps {
   results: SearchResponse | null;
@@ -75,21 +76,23 @@ export function SearchResults({
   const courses = filteredDirectHits.filter((hit) => hit.type === 'course');
   const otherHits = filteredDirectHits.filter((hit) => hit.type !== 'course');
   const hasCourses = courses.length > 0 && showCourses;
+  const overview = results.aiOverview;
 
   return (
     <div className={`w-full mx-auto mt-8 pb-12 ${hasCourses ? 'max-w-6xl' : 'max-w-4xl'}`}>
       {/* Results header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5" style={{ color: '#8B6F5C' }} />
-          <h2 className="text-lg font-semibold text-warm-800">
-            Results for "{results.query}"
-          </h2>
-        </div>
+        <h2 className="text-lg font-semibold text-warm-800">
+          Results for "{results.query}"
+        </h2>
         <span className="text-sm text-warm-500">
           {displayTotal} {displayTotal === 1 ? 'result' : 'results'}
         </span>
       </div>
+
+      {overview && overview.text && (
+        <AiOverview overview={overview} />
+      )}
 
       {/* Two-column layout: main content + courses sidebar */}
       <div className={`flex flex-col ${hasCourses ? 'lg:flex-row lg:gap-6' : ''}`}>

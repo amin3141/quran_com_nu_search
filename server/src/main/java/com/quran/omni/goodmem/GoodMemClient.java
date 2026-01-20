@@ -42,6 +42,14 @@ public final class GoodMemClient {
     private final String rerankerId;
     private final int rerankCandidateSize;
     private final boolean rerankChronologicalResort;
+    private final String overviewLlmId;
+    private final String overviewSysPrompt;
+    private final String overviewPrompt;
+    private final int overviewTokenBudget;
+    private final double overviewTemperature;
+    private final int overviewMaxResults;
+    private final int overviewCandidateSize;
+    private final Double overviewRelevanceThreshold;
 
     public GoodMemClient(AppConfig config) {
         this.baseUrl = config.goodMemBaseUrl();
@@ -49,6 +57,14 @@ public final class GoodMemClient {
         this.rerankerId = config.rerankerId();
         this.rerankCandidateSize = config.rerankCandidateSize();
         this.rerankChronologicalResort = config.rerankChronologicalResort();
+        this.overviewLlmId = config.overviewLlmId();
+        this.overviewSysPrompt = config.overviewSysPrompt();
+        this.overviewPrompt = config.overviewPrompt();
+        this.overviewTokenBudget = config.overviewTokenBudget();
+        this.overviewTemperature = config.overviewTemperature();
+        this.overviewMaxResults = config.overviewMaxResults();
+        this.overviewCandidateSize = config.overviewCandidateSize();
+        this.overviewRelevanceThreshold = config.overviewRelevanceThreshold();
         this.httpClient = buildClient(config.goodMemInsecureSsl());
     }
 
@@ -186,6 +202,118 @@ public final class GoodMemClient {
         return hits;
     }
 
+    public boolean isOverviewEnabled() {
+        return overviewLlmId != null && !overviewLlmId.isBlank();
+    }
+
+    public String generateOverview(String query, List<String> spaceIds) throws IOException, InterruptedException {
+        if (!isOverviewEnabled() || spaceIds == null || spaceIds.isEmpty()) {
+            return null;
+        }
+
+        ObjectNode payload = mapper.createObjectNode();
+        payload.put("message", query);
+        payload.put("requestedSize", resolveOverviewCandidateSize());
+        payload.put("fetchMemory", true);
+        payload.put("fetchMemoryContent", false);
+
+        ArrayNode spaceKeys = payload.putArray("spaceKeys");
+        for (String spaceId : spaceIds) {
+            if (spaceId == null || spaceId.isBlank()) {
+                continue;
+            }
+            ObjectNode spaceKey = spaceKeys.addObject();
+            spaceKey.put("spaceId", spaceId);
+        }
+        if (spaceKeys.isEmpty()) {
+            return null;
+        }
+
+        ObjectNode postProcessor = payload.putObject("postProcessor");
+        postProcessor.put("name", POST_PROCESSOR_FACTORY);
+        ObjectNode config = postProcessor.putObject("config");
+        config.put("llm_id", overviewLlmId);
+        if (rerankerId != null && !rerankerId.isBlank()) {
+            config.put("reranker_id", rerankerId);
+            if (overviewRelevanceThreshold != null) {
+                config.put("relevance_threshold", overviewRelevanceThreshold);
+            }
+            config.put("chronological_resort", rerankChronologicalResort);
+        }
+        if (overviewMaxResults > 0) {
+            config.put("max_results", overviewMaxResults);
+        }
+        if (overviewTemperature >= 0.0) {
+            config.put("llm_temp", overviewTemperature);
+        }
+        if (overviewTokenBudget > 0) {
+            config.put("gen_token_budget", overviewTokenBudget);
+        }
+        if (overviewSysPrompt != null && !overviewSysPrompt.isBlank()) {
+            config.put("sys_prompt", overviewSysPrompt);
+        }
+        if (overviewPrompt != null && !overviewPrompt.isBlank()) {
+            config.put("prompt", overviewPrompt);
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/memories:retrieve"))
+            .timeout(Duration.ofSeconds(60))
+            .header("X-API-Key", apiKey)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/x-ndjson")
+            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .build();
+
+        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() != 200) {
+            String errorBody = readErrorBody(response.body());
+            throw new IOException("GoodMem overview failed: " + response.statusCode() + " " + errorBody);
+        }
+
+        String overview = null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                JsonNode root = mapper.readTree(line);
+                JsonNode abstractReply = root.get("abstractReply");
+                if (abstractReply != null && !abstractReply.isNull()) {
+                    String text = abstractReply.path("text").asText(null);
+                    if (text != null && !text.isBlank()) {
+                        overview = text.trim();
+                    }
+                }
+                if (overview == null) {
+                    JsonNode summaryNode = root.get("summary");
+                    if (summaryNode != null && summaryNode.isTextual()) {
+                        overview = summaryNode.asText().trim();
+                        continue;
+                    }
+                    JsonNode resultsNode = root.get("results");
+                    if (resultsNode != null && resultsNode.isArray()) {
+                        for (JsonNode item : resultsNode) {
+                            if (item == null || item.isNull()) {
+                                continue;
+                            }
+                            JsonNode itemSummary = item.get("summary");
+                            if (itemSummary != null && itemSummary.isTextual()) {
+                                String text = itemSummary.asText();
+                                if (text != null && !text.isBlank()) {
+                                    overview = text.trim();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return overview;
+    }
+
     private boolean shouldApplyReranker(String filter) {
         return rerankerId != null
             && !rerankerId.isBlank()
@@ -197,6 +325,14 @@ public final class GoodMemClient {
             return rerankCandidateSize;
         }
         return 100;
+    }
+
+    private int resolveOverviewCandidateSize() {
+        int candidateSize = overviewCandidateSize > 0 ? overviewCandidateSize : 24;
+        if (overviewMaxResults > candidateSize) {
+            candidateSize = overviewMaxResults;
+        }
+        return candidateSize;
     }
 
     private static double normalizeScore(double relevanceScore) {

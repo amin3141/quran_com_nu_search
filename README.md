@@ -90,6 +90,14 @@ The server defaults to `http://localhost:7070` and exposes `GET /api/search`.
 - `SEARCH_RERANKER_ID` (default `019bd887-2953-7562-92b8-964abb5bffa4`)
 - `SEARCH_RERANK_CANDIDATES` (default `100`)
 - `SEARCH_RERANK_CHRONOLOGICAL_RESORT` (default `false`)
+- `SEARCH_OVERVIEW_LLM_ID` (default `019bc775-3b20-767f-a15f-42cda8039b2c`)
+- `SEARCH_OVERVIEW_SYS_PROMPT` (optional; overrides the system prompt template)
+- `SEARCH_OVERVIEW_PROMPT` (optional; overrides the user prompt template)
+- `SEARCH_OVERVIEW_TOKEN_BUDGET` (default `256`)
+- `SEARCH_OVERVIEW_TEMP` (default `0.3`)
+- `SEARCH_OVERVIEW_MAX_RESULTS` (default `8`)
+- `SEARCH_OVERVIEW_CANDIDATES` (default `24`)
+- `SEARCH_OVERVIEW_RELEVANCE_THRESHOLD` (optional)
 
 ### Railway
 
@@ -126,3 +134,4 @@ The frontend attempts to call `/api/search` and falls back to mock data if the b
 - gRPC API: `https://omni-dev.quran.ai:9090`
 
 The response structure matches the UI types so the mock data and live search stay interchangeable.
+When `SEARCH_OVERVIEW_LLM_ID` is set, the backend uses the GoodMem ChatPostProcessor to add an `aiOverview` summary to search responses.

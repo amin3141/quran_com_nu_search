@@ -392,6 +392,7 @@ export function mockSearch(
   const lowerQuery = query.toLowerCase();
   const results: SearchResponse = {
     query,
+    aiOverview: null,
     directHits: [],
     ayahResults: [],
     totalResults: 0,
@@ -403,6 +404,9 @@ export function mockSearch(
     lowerQuery.includes('2:255') ||
     lowerQuery.includes('throne')
   ) {
+    results.aiOverview = {
+      text: 'Ayat al-Kursi (2:255) describes Allah as the Ever-Living, the Sustainer, and sovereign over the heavens and earth. Tafsir sources emphasize its central themes of divine knowledge, authority, and protection, making it one of the most significant verses in the Quran.',
+    };
     const relatedPosts = samplePosts.filter((p) =>
       p.ayah_keys.includes('2:255')
     );
@@ -435,6 +439,9 @@ export function mockSearch(
     lowerQuery.includes('sabr') ||
     lowerQuery.includes('patient')
   ) {
+    results.aiOverview = {
+      text: 'Relevant verses connect patience with prayer and reliance on Allah, noting that Allah is with those who persevere. Tafsir highlights patience as active endurance in hardship, and reflections apply this guidance to daily trials, including family relationships.',
+    };
     const relatedPosts = samplePosts.filter(
       (p) =>
         p.text.toLowerCase().includes('patience') ||
@@ -474,6 +481,9 @@ export function mockSearch(
 
   // Check for Ramadan related queries
   if (lowerQuery.includes('ramadan') || lowerQuery.includes('fasting')) {
+    results.aiOverview = {
+      text: 'Ramadan results focus on fasting as an act of worship tied to renewal, gratitude, and self-discipline. Related content highlights community reflections and guidance around the blessed month.',
+    };
     const ramadanPosts = samplePosts.filter(
       (p) =>
         p.text.toLowerCase().includes('ramadan') ||
