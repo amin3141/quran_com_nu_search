@@ -77,7 +77,7 @@ export function SearchResults({
   const hasCourses = courses.length > 0 && showCourses;
 
   return (
-    <div className="w-full max-w-6xl mx-auto mt-8 pb-12">
+    <div className={`w-full mx-auto mt-8 pb-12 ${hasCourses ? 'max-w-6xl' : 'max-w-4xl'}`}>
       {/* Results header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
@@ -94,7 +94,7 @@ export function SearchResults({
       {/* Two-column layout: main content + courses sidebar */}
       <div className={`flex flex-col ${hasCourses ? 'lg:flex-row lg:gap-6' : ''}`}>
         {/* Main content column */}
-        <div className={hasCourses ? 'lg:flex-1 lg:min-w-0' : 'w-full max-w-4xl'}>
+        <div className={hasCourses ? 'lg:flex-1 lg:min-w-0' : 'w-full'}>
           {/* Ayah-centric results */}
           {ayahResults.length > 0 && (
             <div className="mb-8">
