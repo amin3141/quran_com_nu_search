@@ -34,6 +34,87 @@ public final class SearchService {
     private static final Pattern SURAH_AYAH_REF = Pattern.compile(
         "(?i)\\bsurah\\s+(\\d{1,3})\\D+ayah\\s+(\\d{1,3})\\b"
     );
+    private static final List<TafsirSourceDefinition> TAFSIR_SOURCE_DEFINITIONS = List.of(
+        TafsirSourceDefinition.of(
+            "ibn-kathir",
+            "Ibn Kathir",
+            "(?iu)\\bibn\\s*[- ]?katheer\\b",
+            "(?iu)\\bibn\\s*[- ]?kathir\\b",
+            "(?u)ابن\\s*كثير"
+        ),
+        TafsirSourceDefinition.of(
+            "tabari",
+            "al-Tabari",
+            "(?iu)\\bal\\s*[- ]?tabari\\b",
+            "(?iu)\\btabari\\b",
+            "(?u)الطبري"
+        ),
+        TafsirSourceDefinition.of(
+            "qurtubi",
+            "al-Qurtubi",
+            "(?iu)\\bal\\s*[- ]?qurtubi\\b",
+            "(?iu)\\bqurtubi\\b",
+            "(?u)القرطبي"
+        ),
+        TafsirSourceDefinition.of(
+            "jalalayn",
+            "al-Jalalayn",
+            "(?iu)\\bjalalayn\\b",
+            "(?iu)\\bal\\s*[- ]?jalalayn\\b",
+            "(?u)الجلالين"
+        ),
+        TafsirSourceDefinition.of(
+            "saadi",
+            "al-Saadi",
+            "(?iu)\\bsa[' ]?di\\b",
+            "(?iu)\\bal\\s*[- ]?sa[' ]?di\\b",
+            "(?u)السعدي"
+        ),
+        TafsirSourceDefinition.of(
+            "baghawi",
+            "al-Baghawi",
+            "(?iu)\\bbaghawi\\b",
+            "(?iu)\\bal\\s*[- ]?baghawi\\b",
+            "(?u)البغوي"
+        ),
+        TafsirSourceDefinition.of(
+            "al-wasit",
+            "al-Wasit",
+            "(?iu)\\bal\\s*[- ]?wasit\\b",
+            "(?iu)\\bwasit\\b",
+            "(?u)الوسيط"
+        ),
+        TafsirSourceDefinition.of(
+            "maarif-ul-quran",
+            "Ma'arif al-Qur'an",
+            "(?iu)\\bma['’]?arif\\s+(?:al|ul)\\s+qur['’]?an\\b",
+            "(?iu)\\bmaarif\\b"
+        ),
+        TafsirSourceDefinition.of(
+            "tazkirul-quran",
+            "Tazkirul Quran",
+            "(?iu)\\btazkir\\s*ul\\s*qur['’]?an\\b",
+            "(?iu)\\btazkirul\\s*qur['’]?an\\b"
+        ),
+        TafsirSourceDefinition.of(
+            "muyassar",
+            "al-Muyassar",
+            "(?iu)\\bmuyassar\\b",
+            "(?u)الميسر"
+        ),
+        TafsirSourceDefinition.of(
+            "tahrir-wa-tanwir",
+            "al-Tahrir wa al-Tanwir",
+            "(?iu)\\btahrir\\s+wa\\s+(?:al\\s+)?tanwir\\b",
+            "(?u)التحرير\\s+والتنوير"
+        ),
+        TafsirSourceDefinition.of(
+            "nathm-aldurar",
+            "Nathm al-Durar",
+            "(?iu)\\bnathm\\s+al\\s*durar\\b",
+            "(?u)نظم\\s+الدرر"
+        )
+    );
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final GoodMemClient client;
@@ -73,6 +154,7 @@ public final class SearchService {
         int requestedLimit = request.limit() != null && request.limit() > 0 ? request.limit() : 8;
         QueryIntent queryIntent = inferIntent(query);
         String ayahReference = extractAyahReference(query);
+        TafsirSourceConstraint tafsirSource = detectTafsirSource(query);
 
         listener.onStatus("Agent started");
 
@@ -86,7 +168,13 @@ public final class SearchService {
         int nextStep = 1;
 
         if (ayahReference != null && maxSteps > 0) {
-            ExactAyahLookup exactLookup = prefetchExactAyah(ayahReference, requestedSpaces, spaceIds, requestedLimit);
+            ExactAyahLookup exactLookup = prefetchExactAyah(
+                ayahReference,
+                requestedSpaces,
+                spaceIds,
+                requestedLimit,
+                tafsirSource
+            );
             if (!exactLookup.spaces().isEmpty()) {
                 listener.onStatus("Step 1: exact ayah lookup for " + ayahReference);
                 int newResultCount = mergeHits(bestHits, exactLookup.hits());
@@ -105,7 +193,7 @@ public final class SearchService {
                     exactLookup.hits().size(),
                     newResultCount,
                     true,
-                    "Exact ayah lookup for " + ayahReference,
+                    exactAyahLookupReason(ayahReference, tafsirSource, exactLookup.spaces()),
                     previewHits(exactLookup.hits(), 5)
                 );
                 toolCalls.add(exactToolCall);
@@ -194,11 +282,19 @@ public final class SearchService {
                 }
             }
 
+            if (tafsirSource != null && toolInput.spaces().contains(SpaceType.TAFSIR)) {
+                forced = true;
+                forcedReason = combineReasons(
+                    forcedReason,
+                    "Applied tafsir source filter for " + tafsirSource.label()
+                );
+            }
+
             String toolSpaces = toolInput.spaces().stream()
                 .map(SpaceType::apiName)
                 .collect(Collectors.joining(", "));
             listener.onStatus("Step " + step + ": searching " + toolSpaces);
-            List<MemoryHit> hits = executeTool(toolInput, spaceIds);
+            List<MemoryHit> hits = executeTool(toolInput, spaceIds, tafsirSource);
             int newResultCount = mergeHits(bestHits, hits);
             if (newResultCount == 0) {
                 noNewResultsStreak += 1;
@@ -575,7 +671,11 @@ public final class SearchService {
             .collect(Collectors.toList());
     }
 
-    private List<MemoryHit> executeTool(ToolInput toolInput, Map<SpaceType, String> spaceIds) {
+    private List<MemoryHit> executeTool(
+        ToolInput toolInput,
+        Map<SpaceType, String> spaceIds,
+        TafsirSourceConstraint tafsirSource
+    ) {
         List<CompletableFuture<List<MemoryHit>>> futures = new ArrayList<>();
         for (SpaceType spaceType : toolInput.spaces()) {
             String spaceId = spaceIds.get(spaceType);
@@ -583,9 +683,10 @@ public final class SearchService {
                 logger.warn("Missing space ID for {}", spaceType);
                 continue;
             }
+            String filter = buildRetrievalFilter(spaceType, null, tafsirSource);
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {
-                    return client.retrieve(toolInput.query(), spaceType, spaceId, toolInput.limit(), null);
+                    return client.retrieve(toolInput.query(), spaceType, spaceId, toolInput.limit(), filter);
                 } catch (Exception ex) {
                     logger.warn("Search failed for {}", spaceType, ex);
                     return List.of();
@@ -603,7 +704,8 @@ public final class SearchService {
         String ayahReference,
         EnumSet<SpaceType> requestedSpaces,
         Map<SpaceType, String> spaceIds,
-        int requestedLimit
+        int requestedLimit,
+        TafsirSourceConstraint tafsirSource
     ) {
         List<SpaceType> exactSpaces = List.of(SpaceType.QURAN, SpaceType.TRANSLATION, SpaceType.TAFSIR).stream()
             .filter(requestedSpaces::contains)
@@ -621,7 +723,11 @@ public final class SearchService {
                 continue;
             }
 
-            String filter = buildExactAyahFilter(spaceType, ayahReference);
+            String filter = buildRetrievalFilter(
+                spaceType,
+                buildExactAyahFilter(spaceType, ayahReference),
+                tafsirSource
+            );
             int limit = exactAyahLimit(spaceType, requestedLimit);
             attemptedSpaces.add(spaceType);
             futures.add(CompletableFuture.supplyAsync(() -> {
@@ -658,6 +764,15 @@ public final class SearchService {
         return Math.max(1, Math.min(clampLimit(requestedLimit), configuredLimit));
     }
 
+    private String buildRetrievalFilter(
+        SpaceType spaceType,
+        String baseFilter,
+        TafsirSourceConstraint tafsirSource
+    ) {
+        String sourceFilter = buildTafsirSourceFilter(spaceType, tafsirSource);
+        return combineFilters(baseFilter, sourceFilter);
+    }
+
     private String buildExactAyahFilter(SpaceType spaceType, String ayahReference) {
         String escaped = escapeFilterValue(ayahReference);
         return switch (spaceType) {
@@ -669,6 +784,25 @@ public final class SearchService {
                     + " OR CAST(val('$.passage_ayah_range') AS TEXT) = '" + escaped + "'";
             default -> "";
         };
+    }
+
+    private String buildTafsirSourceFilter(SpaceType spaceType, TafsirSourceConstraint tafsirSource) {
+        if (spaceType != SpaceType.TAFSIR || tafsirSource == null) {
+            return null;
+        }
+        return "CAST(val('$.code') AS TEXT) = '" + escapeFilterValue(tafsirSource.code()) + "'";
+    }
+
+    private String combineFilters(String left, String right) {
+        String normalizedLeft = blankToNull(left);
+        String normalizedRight = blankToNull(right);
+        if (normalizedLeft == null) {
+            return normalizedRight;
+        }
+        if (normalizedRight == null) {
+            return normalizedLeft;
+        }
+        return "(" + normalizedLeft + ") AND (" + normalizedRight + ")";
     }
 
     private String escapeFilterValue(String value) {
@@ -798,6 +932,9 @@ public final class SearchService {
             || normalized.contains("سورة")) {
             return QueryIntent.VERSE_REFERENCE;
         }
+        if (detectTafsirSource(query) != null) {
+            return QueryIntent.EXPLANATION;
+        }
         if (normalized.contains("tafsir")
             || normalized.contains("interpret")
             || normalized.contains("explain")
@@ -862,6 +999,16 @@ public final class SearchService {
             return ayahRef;
         }
         String normalized = query.replaceAll("\\s+", " ").trim();
+        TafsirSourceConstraint tafsirSource = detectTafsirSource(query);
+        if (tafsirSource != null) {
+            normalized = stripTafsirSourceMentions(normalized, tafsirSource)
+                .replaceAll("(?i)\\bwhat does\\b", " ")
+                .replaceAll("(?i)\\bwhat is\\b", " ")
+                .replaceAll("(?i)\\b(?:say|says)\\s+about\\b", " ")
+                .replaceAll("(?i)\\b(?:tafsir|commentary)\\b", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        }
         if (step > 1 || noNewResultsStreak > 0) {
             normalized = normalized
                 .replaceAll("(?i)\\bwhat does\\b", "")
@@ -873,6 +1020,28 @@ public final class SearchService {
                 .trim();
         }
         return normalized.isBlank() ? query : normalized;
+    }
+
+    private TafsirSourceConstraint detectTafsirSource(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        for (TafsirSourceDefinition definition : TAFSIR_SOURCE_DEFINITIONS) {
+            for (Pattern pattern : definition.queryPatterns()) {
+                if (pattern.matcher(query).find()) {
+                    return new TafsirSourceConstraint(definition.code(), definition.label(), definition.queryPatterns());
+                }
+            }
+        }
+        return null;
+    }
+
+    private String stripTafsirSourceMentions(String query, TafsirSourceConstraint tafsirSource) {
+        String stripped = query;
+        for (Pattern pattern : tafsirSource.queryPatterns()) {
+            stripped = pattern.matcher(stripped).replaceAll(" ");
+        }
+        return stripped.replaceAll("\\s+", " ").trim();
     }
 
     private String extractAyahReference(String query) {
@@ -905,6 +1074,14 @@ public final class SearchService {
             return "2:255";
         }
         return null;
+    }
+
+    private String exactAyahLookupReason(String ayahReference, TafsirSourceConstraint tafsirSource, List<SpaceType> spaces) {
+        String reason = "Exact ayah lookup for " + ayahReference;
+        if (tafsirSource != null && spaces.contains(SpaceType.TAFSIR)) {
+            reason += "; applied tafsir source filter for " + tafsirSource.label();
+        }
+        return reason;
     }
 
     private String heuristicOverview(List<MemoryHit> hits) {
@@ -1104,6 +1281,13 @@ public final class SearchService {
     ) {
     }
 
+    private record TafsirSourceConstraint(
+        String code,
+        String label,
+        List<Pattern> queryPatterns
+    ) {
+    }
+
     private record ExactAyahLookup(
         List<SpaceType> spaces,
         List<MemoryHit> hits,
@@ -1111,6 +1295,20 @@ public final class SearchService {
     ) {
         static ExactAyahLookup empty(int requestedLimit) {
             return new ExactAyahLookup(List.of(), List.of(), Math.max(1, requestedLimit));
+        }
+    }
+
+    private record TafsirSourceDefinition(
+        String code,
+        String label,
+        List<Pattern> queryPatterns
+    ) {
+        static TafsirSourceDefinition of(String code, String label, String... queryPatterns) {
+            return new TafsirSourceDefinition(
+                code,
+                label,
+                List.of(queryPatterns).stream().map(Pattern::compile).collect(Collectors.toList())
+            );
         }
     }
 }
