@@ -329,6 +329,7 @@ public final class SearchService {
         Models.AiOverview aiOverview = buildOverview(
             query,
             requestedSpaces,
+            searchedSpaces,
             spaceIds,
             aggregatedHits,
             plannerSummary
@@ -453,6 +454,7 @@ public final class SearchService {
             - If ayahReference is present, the first search must stay in quran/translation/tafsir.
             - If queryIntent is VERSE_REFERENCE, start with quran and translation; add tafsir if explanation is implied.
             - If queryIntent is EXPLANATION, the first search must include tafsir and should not start with post/course/article.
+            - Questions about which ayah or surah was revealed first or last should be treated as EXPLANATION and include tafsir.
             - If queryIntent is COMMUNITY, the first search should include post.
             - If queryIntent is LEARNING, the first search should include course or article.
             - If queryIntent is TOPICAL, start with quran/translation/tafsir unless the wording clearly asks for reflections, courses, or articles.
@@ -523,6 +525,7 @@ public final class SearchService {
                 || hit.spaceType() == SpaceType.TRANSLATION
                 || hit.spaceType() == SpaceType.TAFSIR
         );
+        boolean hasTafsirEvidence = aggregatedHits.stream().anyMatch(hit -> hit.spaceType() == SpaceType.TAFSIR);
         boolean hasDirectEvidence = aggregatedHits.stream().anyMatch(hit ->
             hit.spaceType() == SpaceType.POST
                 || hit.spaceType() == SpaceType.COURSE
@@ -530,14 +533,33 @@ public final class SearchService {
         );
 
         if (step > 1) {
-            if ((intent == QueryIntent.VERSE_REFERENCE || intent == QueryIntent.EXPLANATION)
-                && hasTextualEvidence) {
+            if (intent == QueryIntent.VERSE_REFERENCE && hasTextualEvidence) {
                 return new PlannerDecision(
                     "Verse-oriented evidence is already strong.",
                     "finish",
                     ToolInput.empty(query, requestedLimit),
                     null
                 );
+            }
+            if (intent == QueryIntent.EXPLANATION) {
+                boolean tafsirRequested = requestedSpaces.contains(SpaceType.TAFSIR);
+                boolean tafsirSearched = searchedSpaces.contains(SpaceType.TAFSIR);
+                if (hasTafsirEvidence) {
+                    return new PlannerDecision(
+                        "Explanation-oriented evidence already includes tafsir.",
+                        "finish",
+                        ToolInput.empty(query, requestedLimit),
+                        null
+                    );
+                }
+                if ((!tafsirRequested || tafsirSearched) && hasTextualEvidence && noNewResultsStreak > 0) {
+                    return new PlannerDecision(
+                        "Explanation-oriented evidence is sufficient after searching tafsir-relevant spaces.",
+                        "finish",
+                        ToolInput.empty(query, requestedLimit),
+                        null
+                    );
+                }
             }
             if ((intent == QueryIntent.COMMUNITY || intent == QueryIntent.LEARNING)
                 && hasDirectEvidence && noNewResultsStreak > 0) {
@@ -812,6 +834,7 @@ public final class SearchService {
     private Models.AiOverview buildOverview(
         String query,
         EnumSet<SpaceType> requestedSpaces,
+        EnumSet<SpaceType> searchedSpaces,
         Map<SpaceType, String> spaceIds,
         List<MemoryHit> hits,
         String plannerSummary
@@ -833,13 +856,16 @@ public final class SearchService {
         }
         if ((summary == null || summary.isBlank()) && client.isOverviewEnabled()) {
             try {
-                List<String> overviewSpaceIds = requestedSpaces.stream()
+                List<String> overviewSpaceIds = searchedSpaces.stream()
+                    .filter(requestedSpaces::contains)
                     .filter(space -> space == SpaceType.QURAN || space == SpaceType.TRANSLATION || space == SpaceType.TAFSIR)
                     .map(spaceIds::get)
                     .filter(id -> id != null && !id.isBlank())
                     .distinct()
                     .collect(Collectors.toList());
-                summary = client.generateOverview(query, overviewSpaceIds);
+                if (!overviewSpaceIds.isEmpty()) {
+                    summary = client.generateOverview(query, overviewSpaceIds);
+                }
             } catch (Exception ex) {
                 logger.warn("GoodMem overview generation failed", ex);
             }
@@ -923,6 +949,9 @@ public final class SearchService {
 
     private QueryIntent inferIntent(String query) {
         String normalized = query.toLowerCase(Locale.ROOT);
+        if (isRevelationHistoryQuery(normalized)) {
+            return QueryIntent.EXPLANATION;
+        }
         if (extractAyahReference(query) != null
             || normalized.contains("ayah")
             || normalized.contains("verse")
@@ -955,12 +984,38 @@ public final class SearchService {
         return QueryIntent.TOPICAL;
     }
 
+    private boolean isRevelationHistoryQuery(String normalizedQuery) {
+        if (normalizedQuery == null || normalizedQuery.isBlank()) {
+            return false;
+        }
+        if (!(normalizedQuery.contains("revealed")
+            || normalizedQuery.contains("revelation")
+            || normalizedQuery.contains("نز")
+            || normalizedQuery.contains("وحي"))) {
+            return false;
+        }
+        return normalizedQuery.contains("ayah")
+            || normalizedQuery.contains("verse")
+            || normalizedQuery.contains("surah")
+            || normalizedQuery.contains("sura")
+            || normalizedQuery.contains("آية")
+            || normalizedQuery.contains("سورة");
+    }
+
     private List<SpaceType> prioritizeSpaces(QueryIntent intent, Set<SpaceType> requestedSpaces) {
         List<SpaceType> priority = switch (intent) {
-            case VERSE_REFERENCE, EXPLANATION -> List.of(
+            case VERSE_REFERENCE -> List.of(
                 SpaceType.QURAN,
                 SpaceType.TRANSLATION,
                 SpaceType.TAFSIR,
+                SpaceType.POST,
+                SpaceType.ARTICLE,
+                SpaceType.COURSE
+            );
+            case EXPLANATION -> List.of(
+                SpaceType.TAFSIR,
+                SpaceType.QURAN,
+                SpaceType.TRANSLATION,
                 SpaceType.POST,
                 SpaceType.ARTICLE,
                 SpaceType.COURSE
