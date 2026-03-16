@@ -1,5 +1,6 @@
 package com.quran.omni;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quran.omni.goodmem.GoodMemClient;
 import com.quran.omni.goodmem.SpaceRegistry;
 import com.quran.omni.search.Models;
@@ -8,6 +9,8 @@ import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
 import io.javalin.json.JavalinJackson;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -15,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
+    private static final ObjectMapper mapper = new ObjectMapper();
 
     public static void main(String[] args) {
         AppConfig config = AppConfig.fromEnv();
@@ -34,6 +38,7 @@ public final class Main {
             javalinConfig.routes.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
             javalinConfig.routes.get("/api/search", ctx -> handleSearchQuery(ctx, searchService));
             javalinConfig.routes.post("/api/search", ctx -> handleSearchBody(ctx, searchService));
+            javalinConfig.routes.post("/api/search/stream", ctx -> handleSearchStream(ctx, searchService));
 
             javalinConfig.routes.exception(IllegalArgumentException.class, (ex, ctx) -> {
                 ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "bad_request", "message", ex.getMessage()));
@@ -59,8 +64,9 @@ public final class Main {
         String spaces = ctx.queryParam("spaces");
         String language = firstNonBlank(ctx.queryParam("language"), ctx.queryParam("lang"));
         Integer limit = parseInt(ctx.queryParam("limit"));
+        Integer maxSteps = parseInt(ctx.queryParam("maxSteps"));
         List<String> spaceList = spaces == null || spaces.isBlank() ? null : List.of(spaces);
-        Models.SearchRequest request = new Models.SearchRequest(query, spaceList, language, limit);
+        Models.SearchRequest request = new Models.SearchRequest(query, spaceList, language, limit, maxSteps);
         Models.SearchResponse response = searchService.search(request);
         ctx.json(response);
     }
@@ -69,6 +75,36 @@ public final class Main {
         Models.SearchRequest request = ctx.bodyAsClass(Models.SearchRequest.class);
         Models.SearchResponse response = searchService.search(request);
         ctx.json(response);
+    }
+
+    private static void handleSearchStream(Context ctx, SearchService searchService) throws IOException {
+        Models.SearchRequest request = ctx.bodyAsClass(Models.SearchRequest.class);
+        ctx.contentType("application/x-ndjson");
+        ctx.status(HttpStatus.OK);
+
+        PrintWriter writer = ctx.res().getWriter();
+        try {
+            Models.SearchResponse response = searchService.search(
+                request,
+                new SearchService.SearchEventListener() {
+                    @Override
+                    public void onStatus(String message) {
+                        writeEvent(writer, Map.of("type", "status", "message", message));
+                    }
+
+                    @Override
+                    public void onToolCall(Models.AgentToolCall toolCall) {
+                        writeEvent(writer, Map.of("type", "tool_call", "data", toolCall));
+                    }
+                }
+            );
+            writeEvent(writer, Map.of("type", "response", "data", response));
+            writeEvent(writer, Map.of("type", "done", "ok", true));
+        } catch (Exception ex) {
+            logger.error("Stream search failed", ex);
+            writeEvent(writer, Map.of("type", "error", "message", ex.getMessage() == null ? "Unexpected server error" : ex.getMessage()));
+            writeEvent(writer, Map.of("type", "done", "ok", false));
+        }
     }
 
     private static String firstNonBlank(String first, String second) {
@@ -89,6 +125,16 @@ public final class Main {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException ex) {
             return null;
+        }
+    }
+
+    private static void writeEvent(PrintWriter writer, Object payload) {
+        try {
+            writer.write(mapper.writeValueAsString(payload));
+            writer.write('\n');
+            writer.flush();
+        } catch (IOException ex) {
+            throw new RuntimeException(ex);
         }
     }
 }

@@ -79,9 +79,16 @@ export function AyahCard({ result, visibleSpaces, postCategory }: AyahCardProps)
     extraTranslations;
 
   useEffect(() => {
+    let frameId: number | null = null;
     if (!showTafsirs || !tafsirText) {
-      setIsTafsirTruncated(false);
-      return;
+      frameId = requestAnimationFrame(() => {
+        setIsTafsirTruncated(false);
+      });
+      return () => {
+        if (frameId !== null) {
+          cancelAnimationFrame(frameId);
+        }
+      };
     }
     if (tafsirExpanded) {
       return;
@@ -90,8 +97,15 @@ export function AyahCard({ result, visibleSpaces, postCategory }: AyahCardProps)
     if (!element) {
       return;
     }
-    const hasOverflow = element.scrollHeight > element.clientHeight + 1;
-    setIsTafsirTruncated(hasOverflow);
+    frameId = requestAnimationFrame(() => {
+      const hasOverflow = element.scrollHeight > element.clientHeight + 1;
+      setIsTafsirTruncated(hasOverflow);
+    });
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
   }, [showTafsirs, tafsirExpanded, tafsirText]);
 
   const canExpandTafsir = isTafsirTruncated || tafsirExpanded;

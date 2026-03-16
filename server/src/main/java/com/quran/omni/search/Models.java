@@ -10,7 +10,8 @@ public final class Models {
         String query,
         List<String> spaces,
         String language,
-        Integer limit
+        Integer limit,
+        Integer maxSteps
     ) {}
 
     public record SearchResponse(
@@ -18,11 +19,43 @@ public final class Models {
         AiOverview aiOverview,
         List<Object> directHits,
         List<ConsolidatedAyahResult> ayahResults,
-        int totalResults
+        int totalResults,
+        List<AgentToolCall> toolCalls,
+        AgentMetadata agent
     ) {}
 
     public record AiOverview(
         String text
+    ) {}
+
+    public record AgentToolCall(
+        int step,
+        String thought,
+        String action,
+        String query,
+        List<String> spaces,
+        int limit,
+        int resultCount,
+        int newResultCount,
+        boolean forced,
+        String forcedReason,
+        List<ResultPreview> preview
+    ) {}
+
+    public record ResultPreview(
+        String type,
+        String title,
+        String ayahKey,
+        String url,
+        double score
+    ) {}
+
+    public record AgentMetadata(
+        String mode,
+        String plannerModel,
+        int steps,
+        boolean usedLlmPlanner,
+        boolean usedHeuristicFallback
     ) {}
 
     public record QuranResult(

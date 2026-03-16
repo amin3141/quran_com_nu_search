@@ -95,6 +95,36 @@ export interface AiOverview {
   text: string;
 }
 
+export interface ResultPreview {
+  type: SpaceType | string;
+  title: string;
+  ayahKey?: string | null;
+  url: string;
+  score: number;
+}
+
+export interface AgentToolCall {
+  step: number;
+  thought?: string | null;
+  action: string;
+  query: string;
+  spaces: string[];
+  limit: number;
+  resultCount: number;
+  newResultCount: number;
+  forced: boolean;
+  forcedReason?: string | null;
+  preview: ResultPreview[];
+}
+
+export interface AgentMetadata {
+  mode: string;
+  plannerModel?: string | null;
+  steps: number;
+  usedLlmPlanner: boolean;
+  usedHeuristicFallback: boolean;
+}
+
 export interface ConsolidatedAyahResult {
   ayah_key: string;
   surah: number;
@@ -114,6 +144,8 @@ export interface SearchResponse {
   directHits: (PostResult | CourseResult | ArticleResult)[];
   ayahResults: ConsolidatedAyahResult[];
   totalResults: number;
+  toolCalls?: AgentToolCall[];
+  agent?: AgentMetadata | null;
 }
 
 export interface FilterOptions {

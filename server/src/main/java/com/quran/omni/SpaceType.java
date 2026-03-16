@@ -32,12 +32,19 @@ public enum SpaceType {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         switch (normalized) {
             case "quran":
+            case "openai-quran":
+            case "openai_quran":
                 return Optional.of(QURAN);
             case "translation":
             case "translations":
+            case "openai-translation":
+            case "openai_translations":
+            case "openai_translation":
                 return Optional.of(TRANSLATION);
             case "tafsir":
             case "tafsirs":
+            case "openai-tafsir":
+            case "openai_tafsir":
                 return Optional.of(TAFSIR);
             case "post":
             case "posts":

@@ -26,7 +26,13 @@ public record AppConfig(
     double overviewTemperature,
     int overviewMaxResults,
     int overviewCandidateSize,
-    Double overviewRelevanceThreshold
+    Double overviewRelevanceThreshold,
+    String openAiBaseUrl,
+    String openAiApiKey,
+    String plannerModel,
+    List<String> plannerFallbackModels,
+    String summaryModel,
+    List<String> summaryFallbackModels
 ) {
     private static final String DEFAULT_OVERVIEW_SYS_PROMPT = String.join("\n",
         "You are an AI assistant generating a concise AI Overview for Quran.com search.",
@@ -108,6 +114,12 @@ public record AppConfig(
         int overviewMaxResults = readIntEnv("SEARCH_OVERVIEW_MAX_RESULTS", 8);
         int overviewCandidateSize = readIntEnv("SEARCH_OVERVIEW_CANDIDATES", 24);
         Double overviewRelevanceThreshold = readNullableDoubleEnv("SEARCH_OVERVIEW_RELEVANCE_THRESHOLD");
+        String openAiBaseUrl = readEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
+        String openAiApiKey = readEnv("OPENAI_API_KEY", "");
+        String plannerModel = readEnv("SEARCH_PLANNER_MODEL", "gpt-4.1-mini");
+        List<String> plannerFallbackModels = splitCsv(readEnv("SEARCH_PLANNER_FALLBACK_MODELS", "gpt-4.1"));
+        String summaryModel = readEnv("SEARCH_SUMMARY_MODEL", plannerModel);
+        List<String> summaryFallbackModels = splitCsv(readEnv("SEARCH_SUMMARY_FALLBACK_MODELS", ""));
 
         return new AppConfig(
             port,
@@ -128,7 +140,13 @@ public record AppConfig(
             overviewTemperature,
             overviewMaxResults,
             overviewCandidateSize,
-            overviewRelevanceThreshold
+            overviewRelevanceThreshold,
+            openAiBaseUrl,
+            openAiApiKey,
+            plannerModel,
+            plannerFallbackModels,
+            summaryModel,
+            summaryFallbackModels
         );
     }
 

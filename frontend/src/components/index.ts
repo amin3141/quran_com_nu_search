@@ -5,3 +5,4 @@ export { SearchResults } from './SearchResults';
 export { AiOverview } from './AiOverview';
 export { AyahCard } from './AyahCard';
 export { DirectHitCard } from './DirectHitCard';
+export { AgentActivity } from './AgentActivity';
