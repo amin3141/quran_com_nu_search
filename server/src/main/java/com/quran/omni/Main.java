@@ -79,7 +79,7 @@ public final class Main {
 
     private static void handleSearchStream(Context ctx, SearchService searchService) throws IOException {
         Models.SearchRequest request = ctx.bodyAsClass(Models.SearchRequest.class);
-        ctx.contentType("application/x-ndjson");
+        ctx.contentType("application/x-ndjson; charset=utf-8");
         ctx.status(HttpStatus.OK);
 
         PrintWriter writer = ctx.res().getWriter();
