@@ -34,6 +34,7 @@ public final class SearchResultAssembler {
     }
 
     public Models.SearchResponse assemble(
+        String traceId,
         String query,
         String language,
         Set<SpaceType> requestedSpaces,
@@ -46,6 +47,14 @@ public final class SearchResultAssembler {
         String resolvedLanguage = language == null || language.isBlank()
             ? config.defaultLanguage()
             : language.toLowerCase(Locale.ROOT);
+        logger.info(
+            "[{}] assemble.start query={} language={} requestedSpaces={} rawHits={}",
+            traceId,
+            quoted(query),
+            resolvedLanguage,
+            requestedSpaces,
+            hits.size()
+        );
 
         List<Models.QuranResult> quranResults = new ArrayList<>();
         List<Models.TranslationResult> translationResults = new ArrayList<>();
@@ -150,6 +159,27 @@ public final class SearchResultAssembler {
             .collect(Collectors.toList());
 
         int totalResults = directHits.size() + ayahResults.size();
+        logger.info(
+            "[{}] assemble.done ayahResults={} directHits={} totalResults={} topAyahs={} topDirectHits={}",
+            traceId,
+            ayahResults.size(),
+            directHits.size(),
+            totalResults,
+            ayahResults.stream()
+                .limit(12)
+                .map(result -> "{ayahKey=" + result.ayah_key()
+                    + ",topScore=" + String.format(Locale.ROOT, "%.6f", result.topScore())
+                    + ",hasQuran=" + (result.quran() != null)
+                    + ",translations=" + result.translations().size()
+                    + ",tafsirs=" + result.tafsirs().size()
+                    + ",posts=" + result.posts().size()
+                    + "}")
+                .collect(Collectors.joining(", ", "[", "]")),
+            directHits.stream()
+                .limit(8)
+                .map(hit -> abbreviated(String.valueOf(hit), 220))
+                .collect(Collectors.joining(", ", "[", "]"))
+        );
         return new Models.SearchResponse(
             query,
             aiOverview,
@@ -270,6 +300,24 @@ public final class SearchResultAssembler {
 
     private static String escapeFilterValue(String value) {
         return value.replace("'", "''");
+    }
+
+    private static String quoted(String value) {
+        if (value == null) {
+            return null;
+        }
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replaceAll("\\s+", " ").trim() + "\"";
+    }
+
+    private static String abbreviated(String value, int limit) {
+        if (value == null) {
+            return null;
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        if (compact.length() <= limit) {
+            return compact;
+        }
+        return compact.substring(0, Math.max(0, limit - 1)) + "…";
     }
 
     private Models.QuranResult toQuranResult(MemoryHit hit) {

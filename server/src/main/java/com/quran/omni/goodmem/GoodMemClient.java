@@ -20,9 +20,11 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.TrustManager;
@@ -114,6 +116,7 @@ public final class GoodMemClient {
         payload.put("requestedSize", requestedSize);
         payload.put("fetchMemory", true);
         payload.put("fetchMemoryContent", false);
+        boolean rerankerApplied = shouldApplyReranker(filter);
 
         ArrayNode spaceKeys = payload.putArray("spaceKeys");
         ObjectNode spaceKey = spaceKeys.addObject();
@@ -121,7 +124,7 @@ public final class GoodMemClient {
         if (filter != null && !filter.isBlank()) {
             spaceKey.put("filter", filter);
         }
-        if (shouldApplyReranker(filter)) {
+        if (rerankerApplied) {
             ObjectNode postProcessor = payload.putObject("postProcessor");
             postProcessor.put("name", POST_PROCESSOR_FACTORY);
             ObjectNode config = postProcessor.putObject("config");
@@ -138,9 +141,27 @@ public final class GoodMemClient {
             .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
             .build();
 
+        logger.info(
+            "goodmem.retrieve.http.start baseUrl={} space={} spaceId={} query={} limit={} requestedSize={} filter={} rerankerApplied={} rerankerId={}",
+            baseUrl,
+            spaceType,
+            maskId(spaceId),
+            quoted(query),
+            limit,
+            requestedSize,
+            filter,
+            rerankerApplied,
+            maskId(rerankerId)
+        );
         HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() != 200) {
             String errorBody = readErrorBody(response.body());
+            logger.warn(
+                "goodmem.retrieve.http.failed space={} status={} body={}",
+                spaceType,
+                response.statusCode(),
+                abbreviate(errorBody, 1000)
+            );
             throw new IOException("GoodMem retrieve failed: " + response.statusCode() + " " + errorBody);
         }
 
@@ -199,6 +220,14 @@ public final class GoodMemClient {
             hits.add(new MemoryHit(spaceType, memoryId, metadata, text, entry.getValue()));
         }
 
+        logger.info(
+            "goodmem.retrieve.http.done space={} status={} rawMemories={} returnedHits={} previews={}",
+            spaceType,
+            response.statusCode(),
+            scoreByMemoryId.size(),
+            hits.size(),
+            hitPreviews(hits, 8)
+        );
         return hits;
     }
 
@@ -228,6 +257,15 @@ public final class GoodMemClient {
         if (spaceKeys.isEmpty()) {
             return null;
         }
+        logger.info(
+            "goodmem.overview.http.start baseUrl={} query={} spaceIds={} requestedSize={} rerankerId={} overviewLlmId={}",
+            baseUrl,
+            quoted(query),
+            spaceIds.stream().map(GoodMemClient::maskId).collect(Collectors.toList()),
+            resolveOverviewCandidateSize(),
+            maskId(rerankerId),
+            maskId(overviewLlmId)
+        );
 
         ObjectNode postProcessor = payload.putObject("postProcessor");
         postProcessor.put("name", POST_PROCESSOR_FACTORY);
@@ -267,6 +305,7 @@ public final class GoodMemClient {
         HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() != 200) {
             String errorBody = readErrorBody(response.body());
+            logger.warn("goodmem.overview.http.failed status={} body={}", response.statusCode(), abbreviate(errorBody, 1000));
             throw new IOException("GoodMem overview failed: " + response.statusCode() + " " + errorBody);
         }
 
@@ -311,6 +350,7 @@ public final class GoodMemClient {
             }
         }
 
+        logger.info("goodmem.overview.http.done status={} summary={}", response.statusCode(), abbreviate(overview, 700));
         return overview;
     }
 
@@ -363,6 +403,64 @@ public final class GoodMemClient {
             logger.warn("Failed reading error body", ex);
             return "";
         }
+    }
+
+    private static String hitPreviews(List<MemoryHit> hits, int limit) {
+        if (hits == null || hits.isEmpty()) {
+            return "[]";
+        }
+        return hits.stream()
+            .sorted(Comparator.comparingDouble(MemoryHit::score).reversed())
+            .limit(limit)
+            .map(hit -> "{space=" + hit.spaceType().apiName()
+                + ",score=" + String.format(java.util.Locale.ROOT, "%.6f", hit.score())
+                + ",ayahKey=" + text(hit.metadata(), "ayah_key")
+                + ",url=" + abbreviate(text(hit.metadata(), "url"), 180)
+                + ",memoryId=" + maskId(hit.memoryId())
+                + ",snippet=" + abbreviate(hit.text(), 220)
+                + "}")
+            .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private static String text(JsonNode node, String field) {
+        if (node == null) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        String text = value.asText();
+        return text == null || text.isBlank() ? null : text.trim();
+    }
+
+    private static String quoted(String value) {
+        if (value == null) {
+            return null;
+        }
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replaceAll("\\s+", " ").trim() + "\"";
+    }
+
+    private static String maskId(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() <= 12) {
+            return trimmed.charAt(0) + "***" + trimmed.charAt(trimmed.length() - 1);
+        }
+        return trimmed.substring(0, 8) + "…" + trimmed.substring(trimmed.length() - 4);
+    }
+
+    private static String abbreviate(String value, int limit) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        if (compact.length() <= limit) {
+            return compact;
+        }
+        return compact.substring(0, Math.max(0, limit - 1)) + "…";
     }
 
     private static HttpClient buildClient(boolean insecureSsl) {

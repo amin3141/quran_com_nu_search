@@ -47,7 +47,7 @@ public final class OpenAiChatClient {
         IOException lastError = null;
         for (String model : models) {
             try {
-                return sendJsonChat(systemPrompt, userPayload, model, temperature);
+                return sendJsonChat(systemPrompt, userPayload, model);
             } catch (IOException ex) {
                 lastError = ex;
             }
@@ -61,12 +61,10 @@ public final class OpenAiChatClient {
     private JsonNode sendJsonChat(
         String systemPrompt,
         JsonNode userPayload,
-        String model,
-        double temperature
+        String model
     ) throws IOException, InterruptedException {
         ObjectNode payload = mapper.createObjectNode();
         payload.put("model", model);
-        payload.put("temperature", temperature);
 
         ArrayNode messages = payload.putArray("messages");
         ObjectNode systemMessage = messages.addObject();
