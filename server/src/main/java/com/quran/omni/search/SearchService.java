@@ -977,7 +977,13 @@ public final class SearchService {
             spaces,
             sortedHits,
             ayahLimit,
-            reference.label(startAyah, startAyah + ayahLimit - 1, requestedEndAyah > startAyah + ayahLimit - 1),
+            directLookupLabel(
+                surahInfo,
+                reference,
+                startAyah,
+                startAyah + ayahLimit - 1,
+                requestedEndAyah > startAyah + ayahLimit - 1
+            ),
             reference
         );
     }
@@ -992,7 +998,24 @@ public final class SearchService {
         metadata.put("lang", "ar");
         metadata.put("name", "Uthmani");
         metadata.put("url", "https://quran.com/" + verse.surah() + "/" + verse.ayah());
+        metadata.put("surah_name_arabic", verse.surahNameArabic());
+        metadata.put("surah_name_transliteration", verse.surahNameTransliteration());
+        quranTextRepo.getSurah(verse.surah()).ifPresent(surah -> {
+            metadata.put("surah_type", surah.type());
+            metadata.put("surah_total_verses", surah.totalVerses());
+        });
         return metadata;
+    }
+
+    private String directLookupLabel(
+        QuranTextRepository.SurahInfo surahInfo,
+        QuranReference reference,
+        int startAyah,
+        int endAyah,
+        boolean truncated
+    ) {
+        String label = reference.label(startAyah, endAyah, truncated);
+        return surahInfo.transliteration() + " (" + surahInfo.nameArabic() + ") " + label;
     }
 
     private ObjectNode translationMetadata(TranslationRepository.TranslationInfo translation) {
@@ -1120,6 +1143,10 @@ public final class SearchService {
             item.put("title", previewTitle(hit));
             item.put("ayahKey", previewAyahKey(hit));
             item.put("url", previewUrl(hit));
+            item.put("surahNameArabic", text(hit.metadata(), "surah_name_arabic"));
+            item.put("surahNameTransliteration", text(hit.metadata(), "surah_name_transliteration"));
+            item.put("surahType", text(hit.metadata(), "surah_type"));
+            item.put("surahTotalVerses", text(hit.metadata(), "surah_total_verses"));
             item.put("text", TextCleaner.cleanSnippet(hit.text(), 500));
             item.put("score", hit.score());
         }
@@ -1129,6 +1156,7 @@ public final class SearchService {
             You are summarizing retrieved Quran.com search evidence.
             Use only the evidence supplied.
             Prefer verse references like 2:255 when applicable.
+            When surah metadata is supplied, name the surah by transliteration and Arabic name before summarizing.
             Mention when evidence comes from tafsir, reflections, courses, or articles.
             Keep the response concise and factual.
             Return STRICT JSON: {"summary": string}

@@ -69,6 +69,10 @@ public final class Models {
         String lang,
         String name,
         String url,
+        String surah_name_arabic,
+        String surah_name_transliteration,
+        String surah_type,
+        int surah_total_verses,
         double score
     ) {}
 

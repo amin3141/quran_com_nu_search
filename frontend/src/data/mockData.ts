@@ -626,6 +626,7 @@ export const surahNames: Record<number, { arabic: string; english: string; trans
   23: { arabic: 'المؤمنون', english: 'The Believers', transliteration: 'Al-Mu\'minun' },
   24: { arabic: 'النور', english: 'The Light', transliteration: 'An-Nur' },
   25: { arabic: 'الفرقان', english: 'The Criterion', transliteration: 'Al-Furqan' },
+  26: { arabic: 'الشعراء', english: 'The Poets', transliteration: 'Ash-Shu\'ara' },
   36: { arabic: 'يس', english: 'Ya-Sin', transliteration: 'Ya-Sin' },
   55: { arabic: 'الرحمن', english: 'The Most Merciful', transliteration: 'Ar-Rahman' },
   56: { arabic: 'الواقعة', english: 'The Event', transliteration: 'Al-Waqi\'ah' },

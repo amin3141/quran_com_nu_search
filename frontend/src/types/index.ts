@@ -12,6 +12,10 @@ export interface QuranResult {
   lang: string;
   name: string;
   url: string;
+  surah_name_arabic?: string | null;
+  surah_name_transliteration?: string | null;
+  surah_type?: string | null;
+  surah_total_verses?: number | null;
   score: number;
 }
 

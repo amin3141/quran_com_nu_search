@@ -41,10 +41,15 @@ export function AyahCard({ result, visibleSpaces, postCategory }: AyahCardProps)
   const [isTafsirTruncated, setIsTafsirTruncated] = useState(false);
   const tafsirRef = useRef<HTMLParagraphElement | null>(null);
 
-  const surahInfo = surahNames[result.surah] || {
+  const fallbackSurahInfo = surahNames[result.surah] || {
     arabic: '',
     english: `Surah ${result.surah}`,
     transliteration: `Surah ${result.surah}`,
+  };
+  const surahInfo = {
+    arabic: result.quran?.surah_name_arabic || fallbackSurahInfo.arabic,
+    english: fallbackSurahInfo.english,
+    transliteration: result.quran?.surah_name_transliteration || fallbackSurahInfo.transliteration,
   };
 
   const isHurufMuqattaat = HURUF_MUQATTAAT_VERSES.has(result.ayah_key);

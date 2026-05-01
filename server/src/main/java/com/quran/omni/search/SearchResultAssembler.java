@@ -235,6 +235,10 @@ public final class SearchResultAssembler {
                     "ar",
                     "Uthmani",
                     "https://quran.com/" + verse.surah() + "/" + verse.ayah(),
+                    verse.surahNameArabic(),
+                    verse.surahNameTransliteration(),
+                    quranTextRepo.getSurah(verse.surah()).map(QuranTextRepository.SurahInfo::type).orElse(null),
+                    quranTextRepo.getSurah(verse.surah()).map(QuranTextRepository.SurahInfo::totalVerses).orElse(0),
                     0.0
                 );
                 AyahAggregate aggregate = ayahMap.computeIfAbsent(
@@ -333,7 +337,27 @@ public final class SearchResultAssembler {
         JsonNode meta = hit.metadata();
         String ayahKey = getString(meta, "ayah_key");
         AyahParts parts = AyahParts.from(meta, ayahKey);
-        String text = quranTextRepo.getVerseText(ayahKey).orElse(hit.text());
+        var verseOpt = quranTextRepo.getVerse(ayahKey);
+        var surahOpt = quranTextRepo.getSurah(parts.surah);
+        String text = verseOpt.map(QuranTextRepository.VerseInfo::text).orElse(hit.text());
+        String surahNameArabic = firstNonBlank(
+            getString(meta, "surah_name_arabic"),
+            verseOpt.map(QuranTextRepository.VerseInfo::surahNameArabic).orElse(null),
+            surahOpt.map(QuranTextRepository.SurahInfo::nameArabic).orElse(null)
+        );
+        String surahNameTransliteration = firstNonBlank(
+            getString(meta, "surah_name_transliteration"),
+            verseOpt.map(QuranTextRepository.VerseInfo::surahNameTransliteration).orElse(null),
+            surahOpt.map(QuranTextRepository.SurahInfo::transliteration).orElse(null)
+        );
+        String surahType = firstNonBlank(
+            getString(meta, "surah_type"),
+            surahOpt.map(QuranTextRepository.SurahInfo::type).orElse(null)
+        );
+        int surahTotalVerses = getInt(meta, "surah_total_verses");
+        if (surahTotalVerses == 0 && surahOpt.isPresent()) {
+            surahTotalVerses = surahOpt.get().totalVerses();
+        }
         return new Models.QuranResult(
             "quran",
             parts.ayah,
@@ -345,6 +369,10 @@ public final class SearchResultAssembler {
             getString(meta, "lang"),
             getString(meta, "name"),
             getString(meta, "url"),
+            surahNameArabic,
+            surahNameTransliteration,
+            surahType,
+            surahTotalVerses,
             hit.score()
         );
     }
@@ -464,6 +492,15 @@ public final class SearchResultAssembler {
             return Double.toString(numeric);
         }
         return value.asText();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static int getInt(JsonNode node, String field) {
