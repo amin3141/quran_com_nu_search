@@ -25,7 +25,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -36,17 +35,6 @@ public final class SearchService {
     private static final AtomicLong SEARCH_SEQUENCE = new AtomicLong();
     private static final int SEARCH_CACHE_MAX_SIZE = 50_000;
     private static final int DIRECT_REFERENCE_MAX_AYAHS = 50;
-    private static final Pattern AYAH_REF = Pattern.compile("\\b(\\d{1,3})\\s*[:/.]\\s*(\\d{1,3})\\b");
-    private static final Pattern AYAH_RANGE_REF = Pattern.compile(
-        "\\b(\\d{1,3})\\s*[:/]\\s*(\\d{1,3})(?:\\s*[-–—]\\s*(\\d{1,3}))?\\b"
-    );
-    private static final Pattern SURAH_AYAH_REF = Pattern.compile(
-        "(?i)\\bsurah\\s+(\\d{1,3})\\D+ayah\\s+(\\d{1,3})\\b"
-    );
-    private static final Pattern STRUCTURED_SURAH_REF = Pattern.compile(
-        "(?iu)\\b(?:surah|sura|soora|chapter)\\s+(\\d{1,3})"
-            + "(?:\\s*(?:[:/]|ayah|ayat|verse|verses)\\s*(\\d{1,3})(?:\\s*[-–—]\\s*(\\d{1,3}))?)?\\b"
-    );
     private static final List<TafsirSourceDefinition> TAFSIR_SOURCE_DEFINITIONS = List.of(
         TafsirSourceDefinition.of(
             "ibn-kathir",
@@ -190,12 +178,10 @@ public final class SearchService {
         logger.info("[{}] search.cache.miss key={} stats={}", traceId, cacheKey, searchCache.stats());
         Map<SpaceType, String> spaceIds = spaceRegistry.resolve();
         QueryIntent queryIntent = inferIntent(query);
-        String ayahReference = extractAyahReference(query);
-        QuranReference quranReference = extractQuranReference(query);
         TafsirSourceConstraint tafsirSource = detectTafsirSource(query);
 
         logger.info(
-            "[{}] search.start query={} language={} requestedSpaces={} maxSteps={} requestedLimit={} intent={} ayahReference={} quranReference={} tafsirSource={} plannerConfigured={} overviewConfigured={}",
+            "[{}] search.start query={} language={} requestedSpaces={} maxSteps={} requestedLimit={} intent={} tafsirSource={} plannerConfigured={} overviewConfigured={}",
             traceId,
             quoted(query),
             language,
@@ -203,8 +189,6 @@ public final class SearchService {
             maxSteps,
             requestedLimit,
             queryIntent,
-            ayahReference,
-            quranReference,
             tafsirSource == null ? null : tafsirSource.label(),
             openAiClient.isConfigured(),
             client.isOverviewEnabled()
@@ -218,96 +202,8 @@ public final class SearchService {
         boolean usedHeuristicFallback = false;
         int noNewResultsStreak = 0;
         String plannerSummary = null;
-        int nextStep = 1;
 
-        if (quranReference != null && maxSteps > 0) {
-            logger.info("[{}] quran_lookup.start reference={} spaces={} limit={}", traceId, quranReference, requestedSpaces, requestedLimit);
-            DirectQuranLookup directLookup = lookupQuranReference(quranReference, requestedSpaces, requestedLimit);
-            if (!directLookup.spaces().isEmpty() && !directLookup.hits().isEmpty()) {
-                listener.onStatus("Step 1: direct Quran lookup for " + directLookup.label());
-                int newResultCount = mergeHits(bestHits, directLookup.hits());
-                if (newResultCount == 0) {
-                    noNewResultsStreak = 1;
-                }
-                searchedSpaces.addAll(directLookup.spaces());
-                logger.info(
-                    "[{}] quran_lookup.done reference={} spaces={} hits={} newResults={} previews={}",
-                    traceId,
-                    quranReference,
-                    directLookup.spaces(),
-                    directLookup.hits().size(),
-                    newResultCount,
-                    previewHitsForLog(directLookup.hits(), 12)
-                );
-
-                Models.AgentToolCall directToolCall = new Models.AgentToolCall(
-                    1,
-                    "Use deterministic Quran reference lookup before semantic search.",
-                    "quran_lookup",
-                    directLookup.label(),
-                    directLookup.spaces().stream().map(SpaceType::apiName).collect(Collectors.toList()),
-                    directLookup.limit(),
-                    directLookup.hits().size(),
-                    newResultCount,
-                    false,
-                    null,
-                    previewHits(directLookup.hits(), 5)
-                );
-                toolCalls.add(directToolCall);
-                listener.onToolCall(directToolCall);
-                nextStep = 2;
-                if (directLookupSatisfiesQuery(queryIntent, tafsirSource)) {
-                    plannerSummary = directLookupSummary(directLookup);
-                    nextStep = maxSteps + 1;
-                    listener.onStatus("Agent finished evidence collection");
-                }
-            }
-        } else if (ayahReference != null && maxSteps > 0) {
-            logger.info("[{}] exact_ayah.start ayahReference={} spaces={} limit={}", traceId, ayahReference, requestedSpaces, requestedLimit);
-            ExactAyahLookup exactLookup = prefetchExactAyah(
-                traceId,
-                ayahReference,
-                requestedSpaces,
-                spaceIds,
-                requestedLimit,
-                tafsirSource
-            );
-            if (!exactLookup.spaces().isEmpty()) {
-                listener.onStatus("Step 1: exact ayah lookup for " + ayahReference);
-                int newResultCount = mergeHits(bestHits, exactLookup.hits());
-                if (newResultCount == 0) {
-                    noNewResultsStreak = 1;
-                }
-                searchedSpaces.addAll(exactLookup.spaces());
-                logger.info(
-                    "[{}] exact_ayah.done spaces={} hits={} newResults={} previews={}",
-                    traceId,
-                    exactLookup.spaces(),
-                    exactLookup.hits().size(),
-                    newResultCount,
-                    previewHitsForLog(exactLookup.hits(), 8)
-                );
-
-                Models.AgentToolCall exactToolCall = new Models.AgentToolCall(
-                    1,
-                    "Use deterministic ayah-key lookup before semantic search.",
-                    "goodmem_exact_ayah",
-                    ayahReference,
-                    exactLookup.spaces().stream().map(SpaceType::apiName).collect(Collectors.toList()),
-                    exactLookup.limit(),
-                    exactLookup.hits().size(),
-                    newResultCount,
-                    true,
-                    exactAyahLookupReason(ayahReference, tafsirSource, exactLookup.spaces()),
-                    previewHits(exactLookup.hits(), 5)
-                );
-                toolCalls.add(exactToolCall);
-                listener.onToolCall(exactToolCall);
-                nextStep = 2;
-            }
-        }
-
-        for (int step = nextStep; step <= maxSteps; step++) {
+        for (int step = 1; step <= maxSteps; step++) {
             List<MemoryHit> aggregatedHits = sortedHits(bestHits.values());
             PlanningOutcome planning = planStep(
                 traceId,
@@ -328,12 +224,13 @@ public final class SearchService {
             String action = decision.action();
             ToolInput toolInput = decision.toolInput();
             logger.info(
-                "[{}] plan.decision step={} mode={} action={} thought={} toolQuery={} spaces={} limit={} summary={}",
+                "[{}] plan.decision step={} mode={} action={} thought={} quranLookup={} toolQuery={} spaces={} limit={} summary={}",
                 traceId,
                 step,
                 planning.usedLlmPlanner() ? "llm" : "heuristic",
                 action,
                 abbreviated(decision.thought(), 500),
+                decision.quranLookupInput(),
                 toolInput == null ? null : quoted(toolInput.query()),
                 toolInput == null ? null : toolInput.spaces(),
                 toolInput == null ? null : toolInput.limit(),
@@ -362,6 +259,71 @@ public final class SearchService {
                 break;
             }
 
+            if ("quran_lookup".equals(action)) {
+                QuranLookupInput quranLookupInput = decision.quranLookupInput();
+                if (quranLookupInput == null || !quranLookupInput.isValid()) {
+                    forced = true;
+                    forcedReason = "Planner returned invalid quran_lookup parameters";
+                    action = "goodmem_search";
+                    toolInput = chooseToolInput(
+                        query,
+                        requestedSpaces,
+                        searchedSpaces,
+                        requestedLimit,
+                        noNewResultsStreak,
+                        queryIntent
+                    );
+                } else {
+                    QuranReference reference = new QuranReference(
+                        quranLookupInput.surah(),
+                        quranLookupInput.startAyah(),
+                        quranLookupInput.endAyah()
+                    );
+                    DirectQuranLookup directLookup = lookupQuranReference(reference, requestedSpaces, requestedLimit);
+                    listener.onStatus("Step " + step + ": direct Quran lookup for " + directLookup.label());
+                    int newResultCount = mergeHits(bestHits, directLookup.hits());
+                    if (newResultCount == 0) {
+                        noNewResultsStreak += 1;
+                    } else {
+                        noNewResultsStreak = 0;
+                    }
+                    searchedSpaces.addAll(directLookup.spaces());
+                    logger.info(
+                        "[{}] quran_lookup.done step={} reference={} spaces={} hits={} newResults={} previews={}",
+                        traceId,
+                        step,
+                        reference,
+                        directLookup.spaces(),
+                        directLookup.hits().size(),
+                        newResultCount,
+                        previewHitsForLog(directLookup.hits(), 12)
+                    );
+
+                    Models.AgentToolCall directToolCall = new Models.AgentToolCall(
+                        step,
+                        blankToNull(decision.thought()),
+                        action,
+                        directLookup.label(),
+                        directLookup.spaces().stream().map(SpaceType::apiName).collect(Collectors.toList()),
+                        directLookup.limit(),
+                        directLookup.hits().size(),
+                        newResultCount,
+                        false,
+                        null,
+                        previewHits(directLookup.hits(), 5)
+                    );
+                    toolCalls.add(directToolCall);
+                    listener.onToolCall(directToolCall);
+
+                    if (!directLookup.hits().isEmpty() && directLookupSatisfiesQuery(queryIntent, tafsirSource)) {
+                        plannerSummary = directLookupSummary(directLookup);
+                        listener.onStatus("Agent finished evidence collection");
+                        break;
+                    }
+                    continue;
+                }
+            }
+
             if (toolInput.spaces().isEmpty()) {
                 forced = true;
                 forcedReason = "Planner returned no spaces; using heuristic space selection";
@@ -379,7 +341,6 @@ public final class SearchService {
                 toolInput,
                 query,
                 queryIntent,
-                ayahReference,
                 requestedSpaces,
                 step
             );
@@ -575,13 +536,9 @@ public final class SearchService {
         int noNewResultsStreak
     ) throws IOException, InterruptedException {
         QueryIntent queryIntent = inferIntent(query);
-        String ayahReference = extractAyahReference(query);
         ObjectNode payload = mapper.createObjectNode();
         payload.put("query", query);
         payload.put("queryIntent", queryIntent.name());
-        if (ayahReference != null) {
-            payload.put("ayahReference", ayahReference);
-        }
         payload.put("step", step);
         payload.put("maxSteps", maxSteps);
         payload.put("requestedLimit", requestedLimit);
@@ -619,10 +576,20 @@ public final class SearchService {
             - course: course lessons
             - article: editorial/article content
 
+            Available tools:
+            - quran_lookup: deterministic Quran reference lookup from local Quran/translation data.
+              Use this when the user gives a surah, ayah, ayah range, Quran reference, or known alias.
+              You must resolve surah names and aliases yourself. Examples:
+              "surah nur 3-4" -> {"surah":24,"start_ayah":3,"end_ayah":4}
+              "an-nur ayah 3" -> {"surah":24,"start_ayah":3,"end_ayah":3}
+              "surah 26" -> {"surah":26,"start_ayah":null,"end_ayah":null}
+              "2:255" or "ayah kursi" -> {"surah":2,"start_ayah":255,"end_ayah":255}
+            - goodmem_search: semantic search over one to three content spaces.
+
             Use one action per step.
             Basic routing rules:
-            - If ayahReference is present, the first search must stay in quran/translation/tafsir.
-            - If queryIntent is VERSE_REFERENCE, start with quran and translation; add tafsir if explanation is implied.
+            - If the query is a Quran reference, surah name/number, ayah, ayah range, or known reference alias, call quran_lookup first.
+            - If queryIntent is VERSE_REFERENCE but it is not resolvable to quran_lookup parameters, start with quran and translation; add tafsir if explanation is implied.
             - If queryIntent is EXPLANATION, the first search must include tafsir and should not start with post/course/article.
             - Questions about which ayah or surah was revealed first or last should be treated as EXPLANATION and include tafsir.
             - If queryIntent is COMMUNITY, the first search should include post.
@@ -631,13 +598,16 @@ public final class SearchService {
 
             Basic constraints:
             - Do not finish on step 1.
+            - For quran_lookup, set tool_input.surah to an integer from 1 to 114.
+            - For quran_lookup, set tool_input.start_ayah/end_ayah to integers for a single ayah or range, or null/null for a whole surah.
+            - For quran_lookup, do not put the reference in tool_input.query; use the numeric fields.
             - For goodmem_search, choose 1 to 3 spaces only.
             - For goodmem_search, tool_input.query must be non-empty and should usually be a simplified rewrite of the user query.
             - If noNewResultsStreak is greater than 0, prefer unsearched spaces or a shorter query rewrite before finishing.
             - Finish only when evidence is already good enough or the useful spaces are exhausted.
 
             Return STRICT JSON:
-            {"thought":string,"action":"goodmem_search"|"finish","tool_input":{"spaces":[string],"query":string,"limit":number},"summary":string}
+            {"thought":string,"action":"quran_lookup"|"goodmem_search"|"finish","tool_input":{"surah":number|null,"start_ayah":number|null,"end_ayah":number|null,"spaces":[string],"query":string,"limit":number},"summary":string}
             For finish, summary should be a concise high-level synthesis and tool_input may be ignored.
             """,
             payload,
@@ -654,9 +624,10 @@ public final class SearchService {
         List<SpaceType> spacesForTool = parseSpaceList(toolInput.path("spaces"), requestedSpaces);
         String toolQuery = text(toolInput, "query");
         int limit = toolInput.path("limit").asInt(requestedLimit);
+        QuranLookupInput quranLookupInput = parseQuranLookupInput(toolInput);
         logger.info("[{}] plan.llm.response step={} response={}", traceId, step, jsonForLog(response, 4000));
 
-        if (toolQuery == null || toolQuery.isBlank()) {
+        if ((toolQuery == null || toolQuery.isBlank()) && !"quran_lookup".equals(action)) {
             toolQuery = rewriteQueryForSearch(query, step, 0);
         }
         if (action == null || action.isBlank()) {
@@ -667,6 +638,7 @@ public final class SearchService {
             thought,
             action.trim().toLowerCase(Locale.ROOT),
             new ToolInput(spacesForTool, toolQuery, clampLimit(limit)),
+            quranLookupInput,
             summary
         );
     }
@@ -688,6 +660,7 @@ public final class SearchService {
                 "Reached max agent steps.",
                 "finish",
                 ToolInput.empty(query, requestedLimit),
+                null,
                 null
             );
         }
@@ -719,6 +692,7 @@ public final class SearchService {
                     "Verse-oriented evidence is already strong.",
                     "finish",
                     ToolInput.empty(query, requestedLimit),
+                    null,
                     null
                 );
             }
@@ -730,6 +704,7 @@ public final class SearchService {
                         "Explanation-oriented evidence already includes tafsir.",
                         "finish",
                         ToolInput.empty(query, requestedLimit),
+                        null,
                         null
                     );
                 }
@@ -738,6 +713,7 @@ public final class SearchService {
                         "Explanation-oriented evidence is sufficient after searching tafsir-relevant spaces.",
                         "finish",
                         ToolInput.empty(query, requestedLimit),
+                        null,
                         null
                     );
                 }
@@ -748,6 +724,7 @@ public final class SearchService {
                     "Direct-content evidence is sufficient and the last step added nothing new.",
                     "finish",
                     ToolInput.empty(query, requestedLimit),
+                    null,
                     null
                 );
             }
@@ -756,6 +733,7 @@ public final class SearchService {
                     "Useful spaces are exhausted.",
                     "finish",
                     ToolInput.empty(query, requestedLimit),
+                    null,
                     null
                 );
             }
@@ -773,6 +751,7 @@ public final class SearchService {
             "Use heuristic space selection for the next retrieval step.",
             "goodmem_search",
             nextToolInput,
+            null,
             null
         );
     }
@@ -804,7 +783,6 @@ public final class SearchService {
         ToolInput toolInput,
         String query,
         QueryIntent intent,
-        String ayahReference,
         EnumSet<SpaceType> requestedSpaces,
         int step
     ) {
@@ -837,12 +815,6 @@ public final class SearchService {
                     reason,
                     "Tightened first-step routing for " + intent.name().toLowerCase(Locale.ROOT)
                 );
-            }
-            if ((intent == QueryIntent.VERSE_REFERENCE || intent == QueryIntent.EXPLANATION)
-                && ayahReference != null
-                && !ayahReference.equals(toolQuery)) {
-                toolQuery = ayahReference;
-                reason = combineReasons(reason, "Normalized first-step query to explicit ayah reference");
             }
         }
 
@@ -933,80 +905,6 @@ public final class SearchService {
             .collect(Collectors.toList());
     }
 
-    private ExactAyahLookup prefetchExactAyah(
-        String traceId,
-        String ayahReference,
-        EnumSet<SpaceType> requestedSpaces,
-        Map<SpaceType, String> spaceIds,
-        int requestedLimit,
-        TafsirSourceConstraint tafsirSource
-    ) {
-        List<SpaceType> exactSpaces = List.of(SpaceType.QURAN, SpaceType.TRANSLATION, SpaceType.TAFSIR).stream()
-            .filter(requestedSpaces::contains)
-            .collect(Collectors.toList());
-        if (exactSpaces.isEmpty()) {
-            return ExactAyahLookup.empty(requestedLimit);
-        }
-
-        List<SpaceType> attemptedSpaces = new ArrayList<>();
-        List<CompletableFuture<List<MemoryHit>>> futures = new ArrayList<>();
-        for (SpaceType spaceType : exactSpaces) {
-            String spaceId = spaceIds.get(spaceType);
-            if (spaceId == null || spaceId.isBlank()) {
-                logger.warn("[{}] exact_ayah.missing_space_id space={}", traceId, spaceType);
-                continue;
-            }
-
-            String filter = buildRetrievalFilter(
-                spaceType,
-                buildExactAyahFilter(spaceType, ayahReference),
-                tafsirSource
-            );
-            int limit = exactAyahLimit(spaceType, requestedLimit);
-            attemptedSpaces.add(spaceType);
-            futures.add(CompletableFuture.supplyAsync(() -> {
-                try {
-                    logger.info(
-                        "[{}] exact_ayah.retrieve.start space={} ayahReference={} limit={} filter={} spaceId={}",
-                        traceId,
-                        spaceType,
-                        ayahReference,
-                        limit,
-                        filter,
-                        maskId(spaceId)
-                    );
-                    List<MemoryHit> hits = client.retrieve(ayahReference, spaceType, spaceId, limit, filter);
-                    logger.info(
-                        "[{}] exact_ayah.retrieve.done space={} hits={} previews={}",
-                        traceId,
-                        spaceType,
-                        hits.size(),
-                        previewHitsForLog(hits, 8)
-                    );
-                    return hits;
-                } catch (Exception ex) {
-                    logger.warn("[{}] exact_ayah.retrieve.failed space={}", traceId, spaceType, ex);
-                    return List.of();
-                }
-            }, executor));
-        }
-
-        if (attemptedSpaces.isEmpty()) {
-            return ExactAyahLookup.empty(requestedLimit);
-        }
-
-        List<MemoryHit> hits = futures.stream()
-            .map(CompletableFuture::join)
-            .flatMap(List::stream)
-            .sorted(Comparator.comparingDouble(MemoryHit::score).reversed())
-            .collect(Collectors.toList());
-        int limit = attemptedSpaces.stream()
-            .mapToInt(spaceType -> exactAyahLimit(spaceType, requestedLimit))
-            .max()
-            .orElse(clampLimit(requestedLimit));
-        return new ExactAyahLookup(attemptedSpaces, hits, limit);
-    }
-
     private DirectQuranLookup lookupQuranReference(
         QuranReference reference,
         EnumSet<SpaceType> requestedSpaces,
@@ -1018,7 +916,9 @@ public final class SearchService {
         }
 
         int startAyah = reference.startAyah() == null ? 1 : reference.startAyah();
-        int requestedEndAyah = reference.endAyah() == null ? surahInfo.totalVerses() : reference.endAyah();
+        int requestedEndAyah = reference.startAyah() == null
+            ? surahInfo.totalVerses()
+            : reference.endAyah() == null ? startAyah : reference.endAyah();
         int endAyah = Math.min(requestedEndAyah, surahInfo.totalVerses());
         if (startAyah < 1 || startAyah > endAyah) {
             return DirectQuranLookup.empty(reference);
@@ -1109,7 +1009,7 @@ public final class SearchService {
     }
 
     private boolean directLookupSatisfiesQuery(QueryIntent queryIntent, TafsirSourceConstraint tafsirSource) {
-        return queryIntent == QueryIntent.VERSE_REFERENCE && tafsirSource == null;
+        return queryIntent != QueryIntent.EXPLANATION && tafsirSource == null;
     }
 
     private String directLookupSummary(DirectQuranLookup lookup) {
@@ -1119,14 +1019,6 @@ public final class SearchService {
         return "Showing direct Quran reference results for " + lookup.label() + ".";
     }
 
-    private int exactAyahLimit(SpaceType spaceType, int requestedLimit) {
-        if (spaceType == SpaceType.QURAN) {
-            return 1;
-        }
-        int configuredLimit = config.spaceLimits().getOrDefault(spaceType, clampLimit(requestedLimit));
-        return Math.max(1, Math.min(clampLimit(requestedLimit), configuredLimit));
-    }
-
     private String buildRetrievalFilter(
         SpaceType spaceType,
         String baseFilter,
@@ -1134,19 +1026,6 @@ public final class SearchService {
     ) {
         String sourceFilter = buildTafsirSourceFilter(spaceType, tafsirSource);
         return combineFilters(baseFilter, sourceFilter);
-    }
-
-    private String buildExactAyahFilter(SpaceType spaceType, String ayahReference) {
-        String escaped = escapeFilterValue(ayahReference);
-        return switch (spaceType) {
-            case QURAN, TRANSLATION ->
-                "CAST(val('$.ayah_key') AS TEXT) = '" + escaped + "'";
-            case TAFSIR ->
-                "CAST(val('$.ayah_key') AS TEXT) = '" + escaped + "'"
-                    + " OR CAST(val('$.passage_ayah_key') AS TEXT) = '" + escaped + "'"
-                    + " OR CAST(val('$.passage_ayah_range') AS TEXT) = '" + escaped + "'";
-            default -> "";
-        };
     }
 
     private String buildTafsirSourceFilter(SpaceType spaceType, TafsirSourceConstraint tafsirSource) {
@@ -1327,9 +1206,9 @@ public final class SearchService {
         if (isRevelationHistoryQuery(normalized)) {
             return QueryIntent.EXPLANATION;
         }
-        if (extractAyahReference(query) != null
-            || normalized.contains("ayah")
+        if (normalized.contains("ayah")
             || normalized.contains("verse")
+            || normalized.contains("chapter")
             || normalized.contains("surah")
             || normalized.contains("sura")
             || normalized.contains("آية")
@@ -1424,10 +1303,6 @@ public final class SearchService {
     }
 
     private String rewriteQueryForSearch(String query, int step, int noNewResultsStreak) {
-        String ayahRef = extractAyahReference(query);
-        if (ayahRef != null) {
-            return ayahRef;
-        }
         String normalized = query.replaceAll("\\s+", " ").trim();
         TafsirSourceConstraint tafsirSource = detectTafsirSource(query);
         if (tafsirSource != null) {
@@ -1472,90 +1347,6 @@ public final class SearchService {
             stripped = pattern.matcher(stripped).replaceAll(" ");
         }
         return stripped.replaceAll("\\s+", " ").trim();
-    }
-
-    private String extractAyahReference(String query) {
-        Matcher direct = AYAH_REF.matcher(query);
-        if (direct.find()) {
-            return direct.group(1) + ":" + direct.group(2);
-        }
-        Matcher verbose = SURAH_AYAH_REF.matcher(query);
-        if (verbose.find()) {
-            return verbose.group(1) + ":" + verbose.group(2);
-        }
-        String canonical = canonicalAyahAlias(query);
-        if (canonical != null) {
-            return canonical;
-        }
-        return null;
-    }
-
-    private QuranReference extractQuranReference(String query) {
-        String canonical = canonicalAyahAlias(query);
-        if (canonical != null) {
-            String[] parts = canonical.split(":", 2);
-            if (parts.length == 2) {
-                return quranReference(parts[0], parts[1], null);
-            }
-        }
-
-        Matcher direct = AYAH_RANGE_REF.matcher(query);
-        if (direct.find()) {
-            return quranReference(direct.group(1), direct.group(2), direct.group(3));
-        }
-
-        Matcher structured = STRUCTURED_SURAH_REF.matcher(query);
-        if (structured.find()) {
-            return quranReference(structured.group(1), structured.group(2), structured.group(3));
-        }
-
-        return null;
-    }
-
-    private QuranReference quranReference(String surahText, String startAyahText, String endAyahText) {
-        try {
-            int surah = Integer.parseInt(surahText);
-            if (surah < 1 || surah > 114) {
-                return null;
-            }
-            if (startAyahText == null || startAyahText.isBlank()) {
-                return new QuranReference(surah, null, null);
-            }
-            int startAyah = Integer.parseInt(startAyahText);
-            int endAyah = endAyahText == null || endAyahText.isBlank()
-                ? startAyah
-                : Integer.parseInt(endAyahText);
-            if (startAyah < 1 || endAyah < startAyah) {
-                return null;
-            }
-            return new QuranReference(surah, startAyah, endAyah);
-        } catch (NumberFormatException ex) {
-            return null;
-        }
-    }
-
-    private String canonicalAyahAlias(String query) {
-        String normalized = query.toLowerCase(Locale.ROOT)
-            .replace('-', ' ')
-            .replace('_', ' ')
-            .replaceAll("\\s+", " ")
-            .trim();
-        if (normalized.contains("ayat al kursi")
-            || normalized.contains("ayah al kursi")
-            || normalized.contains("ayat ul kursi")
-            || normalized.contains("ayatul kursi")
-            || normalized.contains("verse of the throne")) {
-            return "2:255";
-        }
-        return null;
-    }
-
-    private String exactAyahLookupReason(String ayahReference, TafsirSourceConstraint tafsirSource, List<SpaceType> spaces) {
-        String reason = "Exact ayah lookup for " + ayahReference;
-        if (tafsirSource != null && spaces.contains(SpaceType.TAFSIR)) {
-            reason += "; applied tafsir source filter for " + tafsirSource.label();
-        }
-        return reason;
     }
 
     private String heuristicOverview(List<MemoryHit> hits) {
@@ -1611,6 +1402,35 @@ public final class SearchService {
             });
         }
         return spaces;
+    }
+
+    private QuranLookupInput parseQuranLookupInput(JsonNode toolInput) {
+        if (toolInput == null || toolInput.isMissingNode() || toolInput.isNull()) {
+            return null;
+        }
+        Integer surah = nullablePositiveInt(toolInput.get("surah"));
+        Integer startAyah = nullablePositiveInt(toolInput.get("start_ayah"));
+        Integer endAyah = nullablePositiveInt(toolInput.get("end_ayah"));
+        return new QuranLookupInput(surah, startAyah, endAyah);
+    }
+
+    private Integer nullablePositiveInt(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        if (node.isInt() || node.isLong()) {
+            int value = node.asInt();
+            return value > 0 ? value : null;
+        }
+        if (node.isTextual()) {
+            try {
+                int value = Integer.parseInt(node.asText().trim());
+                return value > 0 ? value : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private int resolveMaxSteps(Integer requested) {
@@ -1778,6 +1598,7 @@ public final class SearchService {
         String thought,
         String action,
         ToolInput toolInput,
+        QuranLookupInput quranLookupInput,
         String summary
     ) {
     }
@@ -1822,6 +1643,28 @@ public final class SearchService {
     ) {
     }
 
+    private record QuranLookupInput(
+        Integer surah,
+        Integer startAyah,
+        Integer endAyah
+    ) {
+        boolean isValid() {
+            if (surah == null || surah < 1 || surah > 114) {
+                return false;
+            }
+            if (startAyah == null && endAyah == null) {
+                return true;
+            }
+            if (startAyah == null || startAyah < 1) {
+                return false;
+            }
+            if (endAyah == null) {
+                return true;
+            }
+            return endAyah >= startAyah;
+        }
+    }
+
     private record QuranReference(
         int surah,
         Integer startAyah,
@@ -1829,6 +1672,16 @@ public final class SearchService {
     ) {
         boolean isWholeSurah() {
             return startAyah == null;
+        }
+
+        String requestedLabel() {
+            if (startAyah == null) {
+                return Integer.toString(surah);
+            }
+            if (endAyah == null || endAyah.equals(startAyah)) {
+                return surah + ":" + startAyah;
+            }
+            return surah + ":" + startAyah + "-" + endAyah;
         }
 
         String label(int resolvedStartAyah, int resolvedEndAyah, boolean truncated) {
@@ -1851,7 +1704,7 @@ public final class SearchService {
         QuranReference reference
     ) {
         static DirectQuranLookup empty(QuranReference reference) {
-            return new DirectQuranLookup(List.of(), List.of(), 0, null, reference);
+            return new DirectQuranLookup(List.of(), List.of(), 0, reference.requestedLabel(), reference);
         }
     }
 
@@ -1860,16 +1713,6 @@ public final class SearchService {
         String label,
         List<Pattern> queryPatterns
     ) {
-    }
-
-    private record ExactAyahLookup(
-        List<SpaceType> spaces,
-        List<MemoryHit> hits,
-        int limit
-    ) {
-        static ExactAyahLookup empty(int requestedLimit) {
-            return new ExactAyahLookup(List.of(), List.of(), Math.max(1, requestedLimit));
-        }
     }
 
     private record TafsirSourceDefinition(
