@@ -27,10 +27,19 @@ public final class SearchResultAssembler {
     private final TranslationRepository translationRepo;
 
     public SearchResultAssembler(GoodMemClient client, AppConfig config) {
+        this(client, config, new QuranTextRepository(), new TranslationRepository());
+    }
+
+    public SearchResultAssembler(
+        GoodMemClient client,
+        AppConfig config,
+        QuranTextRepository quranTextRepo,
+        TranslationRepository translationRepo
+    ) {
         this.client = client;
         this.config = config;
-        this.quranTextRepo = new QuranTextRepository();
-        this.translationRepo = new TranslationRepository();
+        this.quranTextRepo = quranTextRepo;
+        this.translationRepo = translationRepo;
     }
 
     public Models.SearchResponse assemble(

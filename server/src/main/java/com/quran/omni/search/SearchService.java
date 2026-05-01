@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.quran.omni.AppConfig;
 import com.quran.omni.SpaceType;
 import com.quran.omni.goodmem.GoodMemClient;
@@ -32,9 +34,18 @@ import org.slf4j.LoggerFactory;
 public final class SearchService {
     private static final Logger logger = LoggerFactory.getLogger(SearchService.class);
     private static final AtomicLong SEARCH_SEQUENCE = new AtomicLong();
-    private static final Pattern AYAH_REF = Pattern.compile("\\b(\\d{1,3})\\s*[:/.-]\\s*(\\d{1,3})\\b");
+    private static final int SEARCH_CACHE_MAX_SIZE = 50_000;
+    private static final int DIRECT_REFERENCE_MAX_AYAHS = 50;
+    private static final Pattern AYAH_REF = Pattern.compile("\\b(\\d{1,3})\\s*[:/.]\\s*(\\d{1,3})\\b");
+    private static final Pattern AYAH_RANGE_REF = Pattern.compile(
+        "\\b(\\d{1,3})\\s*[:/]\\s*(\\d{1,3})(?:\\s*[-–—]\\s*(\\d{1,3}))?\\b"
+    );
     private static final Pattern SURAH_AYAH_REF = Pattern.compile(
         "(?i)\\bsurah\\s+(\\d{1,3})\\D+ayah\\s+(\\d{1,3})\\b"
+    );
+    private static final Pattern STRUCTURED_SURAH_REF = Pattern.compile(
+        "(?iu)\\b(?:surah|sura|soora|chapter)\\s+(\\d{1,3})"
+            + "(?:\\s*(?:[:/]|ayah|ayat|verse|verses)\\s*(\\d{1,3})(?:\\s*[-–—]\\s*(\\d{1,3}))?)?\\b"
     );
     private static final List<TafsirSourceDefinition> TAFSIR_SOURCE_DEFINITIONS = List.of(
         TafsirSourceDefinition.of(
@@ -125,6 +136,9 @@ public final class SearchService {
     private final ExecutorService executor;
     private final OpenAiChatClient openAiClient;
     private final SearchResultAssembler assembler;
+    private final QuranTextRepository quranTextRepo;
+    private final TranslationRepository translationRepo;
+    private final Cache<SearchCacheKey, Models.SearchResponse> searchCache;
 
     public SearchService(GoodMemClient client, SpaceRegistry spaceRegistry, AppConfig config) {
         this.client = client;
@@ -132,7 +146,13 @@ public final class SearchService {
         this.config = config;
         this.executor = Executors.newFixedThreadPool(6);
         this.openAiClient = new OpenAiChatClient(config);
-        this.assembler = new SearchResultAssembler(client, config);
+        this.quranTextRepo = new QuranTextRepository();
+        this.translationRepo = new TranslationRepository();
+        this.assembler = new SearchResultAssembler(client, config, quranTextRepo, translationRepo);
+        this.searchCache = CacheBuilder.newBuilder()
+            .maximumSize(SEARCH_CACHE_MAX_SIZE)
+            .recordStats()
+            .build();
     }
 
     public Models.SearchResponse search(Models.SearchRequest request) {
@@ -152,15 +172,30 @@ public final class SearchService {
         }
         EnumSet<SpaceType> requestedSpaces = parseSpaces(request.spaces());
         requestedSpaces.add(SpaceType.QURAN);
-        Map<SpaceType, String> spaceIds = spaceRegistry.resolve();
         int maxSteps = resolveMaxSteps(request.maxSteps());
         int requestedLimit = request.limit() != null && request.limit() > 0 ? request.limit() : 8;
+        SearchCacheKey cacheKey = SearchCacheKey.from(query, language, requestedSpaces, requestedLimit, maxSteps);
+        Models.SearchResponse cachedResponse = searchCache.getIfPresent(cacheKey);
+        if (cachedResponse != null) {
+            logger.info(
+                "[{}] search.cache.hit key={} stats={}",
+                traceId,
+                cacheKey,
+                searchCache.stats()
+            );
+            listener.onStatus("Serving cached results");
+            return cachedResponse;
+        }
+
+        logger.info("[{}] search.cache.miss key={} stats={}", traceId, cacheKey, searchCache.stats());
+        Map<SpaceType, String> spaceIds = spaceRegistry.resolve();
         QueryIntent queryIntent = inferIntent(query);
         String ayahReference = extractAyahReference(query);
+        QuranReference quranReference = extractQuranReference(query);
         TafsirSourceConstraint tafsirSource = detectTafsirSource(query);
 
         logger.info(
-            "[{}] search.start query={} language={} requestedSpaces={} maxSteps={} requestedLimit={} intent={} ayahReference={} tafsirSource={} plannerConfigured={} overviewConfigured={}",
+            "[{}] search.start query={} language={} requestedSpaces={} maxSteps={} requestedLimit={} intent={} ayahReference={} quranReference={} tafsirSource={} plannerConfigured={} overviewConfigured={}",
             traceId,
             quoted(query),
             language,
@@ -169,6 +204,7 @@ public final class SearchService {
             requestedLimit,
             queryIntent,
             ayahReference,
+            quranReference,
             tafsirSource == null ? null : tafsirSource.label(),
             openAiClient.isConfigured(),
             client.isOverviewEnabled()
@@ -184,7 +220,49 @@ public final class SearchService {
         String plannerSummary = null;
         int nextStep = 1;
 
-        if (ayahReference != null && maxSteps > 0) {
+        if (quranReference != null && maxSteps > 0) {
+            logger.info("[{}] quran_lookup.start reference={} spaces={} limit={}", traceId, quranReference, requestedSpaces, requestedLimit);
+            DirectQuranLookup directLookup = lookupQuranReference(quranReference, requestedSpaces, requestedLimit);
+            if (!directLookup.spaces().isEmpty() && !directLookup.hits().isEmpty()) {
+                listener.onStatus("Step 1: direct Quran lookup for " + directLookup.label());
+                int newResultCount = mergeHits(bestHits, directLookup.hits());
+                if (newResultCount == 0) {
+                    noNewResultsStreak = 1;
+                }
+                searchedSpaces.addAll(directLookup.spaces());
+                logger.info(
+                    "[{}] quran_lookup.done reference={} spaces={} hits={} newResults={} previews={}",
+                    traceId,
+                    quranReference,
+                    directLookup.spaces(),
+                    directLookup.hits().size(),
+                    newResultCount,
+                    previewHitsForLog(directLookup.hits(), 12)
+                );
+
+                Models.AgentToolCall directToolCall = new Models.AgentToolCall(
+                    1,
+                    "Use deterministic Quran reference lookup before semantic search.",
+                    "quran_lookup",
+                    directLookup.label(),
+                    directLookup.spaces().stream().map(SpaceType::apiName).collect(Collectors.toList()),
+                    directLookup.limit(),
+                    directLookup.hits().size(),
+                    newResultCount,
+                    false,
+                    null,
+                    previewHits(directLookup.hits(), 5)
+                );
+                toolCalls.add(directToolCall);
+                listener.onToolCall(directToolCall);
+                nextStep = 2;
+                if (directLookupSatisfiesQuery(queryIntent, tafsirSource)) {
+                    plannerSummary = directLookupSummary(directLookup);
+                    nextStep = maxSteps + 1;
+                    listener.onStatus("Agent finished evidence collection");
+                }
+            }
+        } else if (ayahReference != null && maxSteps > 0) {
             logger.info("[{}] exact_ayah.start ayahReference={} spaces={} limit={}", traceId, ayahReference, requestedSpaces, requestedLimit);
             ExactAyahLookup exactLookup = prefetchExactAyah(
                 traceId,
@@ -407,7 +485,7 @@ public final class SearchService {
             aggregatedHits.size(),
             previewHitsForLog(aggregatedHits, 12)
         );
-        return assembler.assemble(
+        Models.SearchResponse response = assembler.assemble(
             traceId,
             query,
             language,
@@ -418,6 +496,9 @@ public final class SearchService {
             toolCalls,
             agentMetadata
         );
+        searchCache.put(cacheKey, response);
+        logger.info("[{}] search.cache.store key={} stats={}", traceId, cacheKey, searchCache.stats());
+        return response;
     }
 
     public void shutdown() {
@@ -926,6 +1007,118 @@ public final class SearchService {
         return new ExactAyahLookup(attemptedSpaces, hits, limit);
     }
 
+    private DirectQuranLookup lookupQuranReference(
+        QuranReference reference,
+        EnumSet<SpaceType> requestedSpaces,
+        int requestedLimit
+    ) {
+        var surahInfo = quranTextRepo.getSurah(reference.surah()).orElse(null);
+        if (surahInfo == null) {
+            return DirectQuranLookup.empty(reference);
+        }
+
+        int startAyah = reference.startAyah() == null ? 1 : reference.startAyah();
+        int requestedEndAyah = reference.endAyah() == null ? surahInfo.totalVerses() : reference.endAyah();
+        int endAyah = Math.min(requestedEndAyah, surahInfo.totalVerses());
+        if (startAyah < 1 || startAyah > endAyah) {
+            return DirectQuranLookup.empty(reference);
+        }
+
+        int ayahCount = endAyah - startAyah + 1;
+        int ayahLimit = reference.isWholeSurah()
+            ? Math.min(ayahCount, clampLimit(requestedLimit))
+            : Math.min(ayahCount, DIRECT_REFERENCE_MAX_AYAHS);
+        if (ayahLimit <= 0) {
+            return DirectQuranLookup.empty(reference);
+        }
+
+        List<SpaceType> spaces = new ArrayList<>();
+        if (requestedSpaces.contains(SpaceType.QURAN)) {
+            spaces.add(SpaceType.QURAN);
+        }
+        if (requestedSpaces.contains(SpaceType.TRANSLATION)) {
+            spaces.add(SpaceType.TRANSLATION);
+        }
+        if (spaces.isEmpty()) {
+            return DirectQuranLookup.empty(reference);
+        }
+
+        List<MemoryHit> hits = new ArrayList<>();
+        for (int offset = 0; offset < ayahLimit; offset++) {
+            int ayah = startAyah + offset;
+            String ayahKey = reference.surah() + ":" + ayah;
+            double score = 1.0 - (offset * 0.0001);
+
+            if (spaces.contains(SpaceType.QURAN)) {
+                quranTextRepo.getVerse(ayahKey).ifPresent(verse -> hits.add(new MemoryHit(
+                    SpaceType.QURAN,
+                    "local:quran:" + ayahKey,
+                    quranMetadata(verse),
+                    verse.text(),
+                    score
+                )));
+            }
+
+            if (spaces.contains(SpaceType.TRANSLATION)) {
+                translationRepo.getTranslation(ayahKey).ifPresent(translation -> hits.add(new MemoryHit(
+                    SpaceType.TRANSLATION,
+                    "local:translation:" + ayahKey,
+                    translationMetadata(translation),
+                    translation.text(),
+                    score - 0.00001
+                )));
+            }
+        }
+
+        List<MemoryHit> sortedHits = hits.stream()
+            .sorted(Comparator.comparingDouble(MemoryHit::score).reversed())
+            .collect(Collectors.toList());
+        return new DirectQuranLookup(
+            spaces,
+            sortedHits,
+            ayahLimit,
+            reference.label(startAyah, startAyah + ayahLimit - 1, requestedEndAyah > startAyah + ayahLimit - 1),
+            reference
+        );
+    }
+
+    private ObjectNode quranMetadata(QuranTextRepository.VerseInfo verse) {
+        ObjectNode metadata = mapper.createObjectNode();
+        metadata.put("ayah_key", verse.ayahKey());
+        metadata.put("surah", verse.surah());
+        metadata.put("ayah", verse.ayah());
+        metadata.put("edition_id", "quran-uthmani");
+        metadata.put("edition_type", "quran");
+        metadata.put("lang", "ar");
+        metadata.put("name", "Uthmani");
+        metadata.put("url", "https://quran.com/" + verse.surah() + "/" + verse.ayah());
+        return metadata;
+    }
+
+    private ObjectNode translationMetadata(TranslationRepository.TranslationInfo translation) {
+        ObjectNode metadata = mapper.createObjectNode();
+        metadata.put("ayah_key", translation.ayahKey());
+        metadata.put("surah", translation.surah());
+        metadata.put("ayah", translation.ayah());
+        metadata.put("author", "A.J. Arberry");
+        metadata.put("edition_id", "en-arberry");
+        metadata.put("lang", "en");
+        metadata.put("name", "The Koran Interpreted");
+        metadata.put("url", "https://quran.com/" + translation.surah() + "/" + translation.ayah() + "?translations=en-arberry");
+        return metadata;
+    }
+
+    private boolean directLookupSatisfiesQuery(QueryIntent queryIntent, TafsirSourceConstraint tafsirSource) {
+        return queryIntent == QueryIntent.VERSE_REFERENCE && tafsirSource == null;
+    }
+
+    private String directLookupSummary(DirectQuranLookup lookup) {
+        if (lookup.hits().isEmpty()) {
+            return null;
+        }
+        return "Showing direct Quran reference results for " + lookup.label() + ".";
+    }
+
     private int exactAyahLimit(SpaceType spaceType, int requestedLimit) {
         if (spaceType == SpaceType.QURAN) {
             return 1;
@@ -1297,6 +1490,50 @@ public final class SearchService {
         return null;
     }
 
+    private QuranReference extractQuranReference(String query) {
+        String canonical = canonicalAyahAlias(query);
+        if (canonical != null) {
+            String[] parts = canonical.split(":", 2);
+            if (parts.length == 2) {
+                return quranReference(parts[0], parts[1], null);
+            }
+        }
+
+        Matcher direct = AYAH_RANGE_REF.matcher(query);
+        if (direct.find()) {
+            return quranReference(direct.group(1), direct.group(2), direct.group(3));
+        }
+
+        Matcher structured = STRUCTURED_SURAH_REF.matcher(query);
+        if (structured.find()) {
+            return quranReference(structured.group(1), structured.group(2), structured.group(3));
+        }
+
+        return null;
+    }
+
+    private QuranReference quranReference(String surahText, String startAyahText, String endAyahText) {
+        try {
+            int surah = Integer.parseInt(surahText);
+            if (surah < 1 || surah > 114) {
+                return null;
+            }
+            if (startAyahText == null || startAyahText.isBlank()) {
+                return new QuranReference(surah, null, null);
+            }
+            int startAyah = Integer.parseInt(startAyahText);
+            int endAyah = endAyahText == null || endAyahText.isBlank()
+                ? startAyah
+                : Integer.parseInt(endAyahText);
+            if (startAyah < 1 || endAyah < startAyah) {
+                return null;
+            }
+            return new QuranReference(surah, startAyah, endAyah);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     private String canonicalAyahAlias(String query) {
         String normalized = query.toLowerCase(Locale.ROOT)
             .replace('-', ' ')
@@ -1552,10 +1789,70 @@ public final class SearchService {
     ) {
     }
 
+    private record SearchCacheKey(
+        String query,
+        String language,
+        List<String> spaces,
+        int limit,
+        int maxSteps
+    ) {
+        static SearchCacheKey from(
+            String query,
+            String language,
+            Set<SpaceType> spaces,
+            int limit,
+            int maxSteps
+        ) {
+            return new SearchCacheKey(
+                query.trim(),
+                language.toLowerCase(Locale.ROOT),
+                spaces.stream()
+                    .sorted(Comparator.comparingInt(Enum::ordinal))
+                    .map(SpaceType::apiName)
+                    .toList(),
+                limit,
+                maxSteps
+            );
+        }
+    }
+
     private record ToolInputTightening(
         ToolInput toolInput,
         String reason
     ) {
+    }
+
+    private record QuranReference(
+        int surah,
+        Integer startAyah,
+        Integer endAyah
+    ) {
+        boolean isWholeSurah() {
+            return startAyah == null;
+        }
+
+        String label(int resolvedStartAyah, int resolvedEndAyah, boolean truncated) {
+            String label = surah + ":" + resolvedStartAyah;
+            if (resolvedEndAyah != resolvedStartAyah || isWholeSurah()) {
+                label += "-" + resolvedEndAyah;
+            }
+            if (truncated) {
+                label += " (partial)";
+            }
+            return label;
+        }
+    }
+
+    private record DirectQuranLookup(
+        List<SpaceType> spaces,
+        List<MemoryHit> hits,
+        int limit,
+        String label,
+        QuranReference reference
+    ) {
+        static DirectQuranLookup empty(QuranReference reference) {
+            return new DirectQuranLookup(List.of(), List.of(), 0, null, reference);
+        }
     }
 
     private record TafsirSourceConstraint(
