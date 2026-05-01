@@ -1653,7 +1653,7 @@ public final class SearchService {
             int maxSteps
         ) {
             return new SearchCacheKey(
-                query.trim(),
+                query.trim().toLowerCase(Locale.ROOT),
                 language.toLowerCase(Locale.ROOT),
                 spaces.stream()
                     .sorted(Comparator.comparingInt(Enum::ordinal))
